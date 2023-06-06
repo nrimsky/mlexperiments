@@ -18,7 +18,7 @@ def calc_jacobian(model, data_loader_train, loss_fn, num_samples = 30):
     Computes the Jacobian matrix (num_samples x num_parameters) of the model's loss on the training data with 
     respect to the model's parameters
     """
-    jacobian_matrices = []
+    rows = []
     samples = 0
     for _, (images, labels) in enumerate(data_loader_train):
         for image, label in zip(images, labels):
@@ -31,10 +31,10 @@ def calc_jacobian(model, data_loader_train, loss_fn, num_samples = 30):
             model.zero_grad()
             loss.backward()
 
-            jacobian_matrix = t.cat([p.grad.view(-1) for p in model.parameters()])  # Flatten gradients
-            jacobian_matrices.append(jacobian_matrix)
+            grads = t.cat([p.grad.view(-1) for p in model.parameters()])  # Flatten gradients
+            rows.append(grads)
 
-    return t.stack(jacobian_matrices)
+    return t.stack(rows)
 
 def calculate_log_volume(T, hessian):
     """
