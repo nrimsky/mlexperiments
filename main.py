@@ -1,85 +1,50 @@
-"""
-Task:
-Write a function that takes in a trained net, its training data and loss function.
-Returns an estimate of the volume of the basin in which the trained parameter values ended up.
-In particular, this should be the sort of function you could use to test the hypothesis that basin breadth accounts for generalization. 
-
-This implementation uses the Gauss-Newton approximation to the Hessian of the loss function.
-"""
-
 import torch as t
-from train_mnist import get_basin_calc_info_mnist
+from torch.autograd.functional import hvp
 import numpy as np
-import math
+from math import lgamma
+from torch.nn.utils import vector_to_parameters, parameters_to_vector
+from scipy.sparse.linalg import LinearOperator, eigsh
+from train_mnist import get_basin_calc_info_mnist
+import copy
 
-    
-def calc_jacobian(model, data_loader_train, loss_fn, num_samples = 30):
-    """
-    Computes the Jacobian matrix (num_samples x num_parameters) of the model's loss on the training data with 
-    respect to the model's parameters
-    """
-    rows = []
-    samples = 0
-    for _, (images, labels) in enumerate(data_loader_train):
-        for image, label in zip(images, labels):
-            samples += 1
-            if samples > num_samples:
-                break
-            output = model(image.unsqueeze(0))
-            # calculate the loss
-            loss = loss_fn(output, label.unsqueeze(0))
-            model.zero_grad()
-            loss.backward()
 
-            grads = t.cat([p.grad.view(-1) for p in model.parameters()])  # Flatten gradients
-            rows.append(grads)
-
-    return t.stack(rows)
-
-def calculate_log_volume(T, hessian):
-    """
-    Calculates the logarithm of the volume of the basin of attraction based on a loss threshold.
-
-    The volume of the basin of attraction is derived based on the eigenvalues of the Hessian of the loss 
-    function. For each eigenvalue, a radius of the ellipsoid in the corresponding direction is calculated. 
-    The volume of the ellipsoid is then calculated as the product of these radii times the volume of the 
-    unit n-ball in n dimensions.
-
-    The calculation is performed in the logarithmic domain to avoid potential overflow issues.
-
-    Parameters:
-    T (float): The loss threshold defining the basin of attraction.
-    hessian (Tensor): The Hessian matrix of second derivatives of the loss function.
-
-    Returns:
-    float: The logarithm of the volume of the basin of attraction.
-    """
-    n = hessian.shape[0]  # Number of parameters in the model
-
-    # Compute logarithms to avoid overflow
-    log_Vn = n / 2.0 * np.log(np.pi) - math.lgamma(n / 2.0 + 1)  # volume of the unit n-ball in n dimensions
-
-    # Eigenvalues
-    eigenvalues_info = t.linalg.eig(hessian)
-    eigenvalues = eigenvalues_info.eigenvalues.real  # We only need the real parts for symmetric matrix
-
-    # Check for zero eigenvalues and replace them with a very small number to avoid zero determinant
-    eigenvalues[eigenvalues == 0] = 1e-7  # Small positive value
-
-    # Determinant calculation using the sum of logarithms of eigenvalues
-    log_det_hessian = t.sum(t.log(eigenvalues.abs()))
-
-    # Calculate the log volume
+def calculate_log_volume(T, eigenvalues, n):
+    log_Vn = n / 2.0 * np.log(np.pi) - lgamma(n / 2.0 + 1)
+    eigenvalues = np.clip(eigenvalues, 1e-7, None)
+    log_det_hessian = np.sum(np.log(eigenvalues))
     log_volume = log_Vn + n / 2.0 * np.log(2 * T) - 0.5 * log_det_hessian
-
     return log_volume
 
-def calc_basin_volume(model, loss, train_data_loader):
-    jacobian = calc_jacobian(model, train_data_loader, loss)
-    print(f"Jacobian shape: {jacobian.shape}")
-    hessian = 2 * t.einsum('ij,ik->jk', jacobian, jacobian)  # Compute Hessian(Loss) with Gauss-Newton approximation
-    log_v = calculate_log_volume(T=0.01, hessian=hessian)
-    print("Basin Volume: exp({:.2f})".format(log_v))
+
+def calc_basin_volume(model, loss_fn, train_data_loader, num_batches=20):
+    num_params = sum(p.numel() for p in model.parameters())
+    subset_images, subset_labels = [], []
+    for batch_idx, (images, labels) in enumerate(train_data_loader):
+        if batch_idx >= num_batches:
+            break
+        subset_images.append(images)
+        subset_labels.append(labels)
+    subset_images = t.cat(subset_images)
+    subset_labels = t.cat(subset_labels)
+
+    def hvp_fn(v):
+        v_tensor = t.tensor(v, dtype=next(model.parameters()).dtype)
+        model_clone = copy.deepcopy(model)  # Create a clone of the model
+        vector_to_parameters(v_tensor, model_clone.parameters())  # Work on the clone instead
+
+        def compute_loss(p):
+            vector_to_parameters(p, model_clone.parameters())
+            outputs = model_clone(subset_images)
+            return loss_fn(outputs, subset_labels)
+
+        hv = hvp(compute_loss, parameters_to_vector(model_clone.parameters()), v_tensor)[1]
+        return hv.view(-1).detach().numpy()  # Convert back to numpy
+
+    H = LinearOperator((num_params, num_params), matvec=hvp_fn)
+    eigenvalues = eigsh(H, return_eigenvectors=False)
+    vol = calculate_log_volume(T=80, eigenvalues=eigenvalues, n=num_params)
+    print(f"Log Basin Volume: {vol}")
+
 
 if __name__ == "__main__":
     model, loss, train_data_loader = get_basin_calc_info_mnist()
