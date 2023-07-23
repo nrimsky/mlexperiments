@@ -1,51 +1,47 @@
 import torch as t
-from torch.autograd.functional import hvp
-import numpy as np
-from math import lgamma
-from torch.nn.utils import vector_to_parameters, parameters_to_vector
+from torch.autograd import grad
 from scipy.sparse.linalg import LinearOperator, eigsh
 from train_mnist import get_basin_calc_info_mnist
-import copy
 
 
-def calculate_log_volume(T, eigenvalues, n):
-    log_Vn = n / 2.0 * np.log(np.pi) - lgamma(n / 2.0 + 1)
-    eigenvalues = np.clip(eigenvalues, 1e-7, None)
-    log_det_hessian = np.sum(np.log(eigenvalues))
-    log_volume = log_Vn + n / 2.0 * np.log(2 * T) - 0.5 * log_det_hessian
-    return log_volume
-
-
-def calc_basin_volume(model, loss_fn, train_data_loader, num_batches=20):
+def get_hessian_eigenvalues(model, loss_fn, train_data_loader, num_batches=1, device="cuda"):
     num_params = sum(p.numel() for p in model.parameters())
     subset_images, subset_labels = [], []
     for batch_idx, (images, labels) in enumerate(train_data_loader):
         if batch_idx >= num_batches:
             break
-        subset_images.append(images)
-        subset_labels.append(labels)
+        subset_images.append(images.to(device))
+        subset_labels.append(labels.to(device))
     subset_images = t.cat(subset_images)
     subset_labels = t.cat(subset_labels)
 
-    def hvp_fn(v):
-        v_tensor = t.tensor(v, dtype=next(model.parameters()).dtype)
-        model_clone = copy.deepcopy(model)  # Create a clone of the model
-        vector_to_parameters(v_tensor, model_clone.parameters())  # Work on the clone instead
-
-        def compute_loss(p):
-            vector_to_parameters(p, model_clone.parameters())
-            outputs = model_clone(subset_images)
-            return loss_fn(outputs, subset_labels)
-
-        hv = hvp(compute_loss, parameters_to_vector(model_clone.parameters()), v_tensor)[1]
-        return hv.view(-1).detach().numpy()  # Convert back to numpy
-
-    H = LinearOperator((num_params, num_params), matvec=hvp_fn)
-    eigenvalues = eigsh(H, return_eigenvectors=False)
-    vol = calculate_log_volume(T=80, eigenvalues=eigenvalues, n=num_params)
-    print(f"Log Basin Volume: {vol}")
+    def compute_loss():
+        output = model(subset_images)
+        return loss_fn(output, subset_labels)
+    
+    def hessian_vector_product(vector):
+        model.zero_grad()
+        grad_params = grad(compute_loss(), model.parameters(), create_graph=True)
+        flat_grad = t.cat([g.view(-1) for g in grad_params])
+        grad_vector_product = t.sum(flat_grad * vector)
+        hvp = grad(grad_vector_product, model.parameters(), retain_graph=True)
+        return t.cat([g.contiguous().view(-1) for g in hvp])
+    
+    def matvec(v):
+        v_tensor = t.tensor(v, dtype=t.float32, device=device)
+        return hessian_vector_product(v_tensor).cpu().detach().numpy()
+    
+    linear_operator = LinearOperator((num_params, num_params), matvec=matvec)
+    eigenvalues, _ = eigsh(linear_operator, k=50)
+    tot = 0
+    for e in eigenvalues:
+        print("{:.2f}".format(e))
+        if e > 2.0:
+            tot += 1
+    print("Number of eigenvalues greater than 2.0: {}".format(tot))
 
 
 if __name__ == "__main__":
     model, loss, train_data_loader = get_basin_calc_info_mnist()
-    calc_basin_volume(model, loss, train_data_loader)
+    model.to("cuda")
+    get_hessian_eigenvalues(model, loss, train_data_loader)
