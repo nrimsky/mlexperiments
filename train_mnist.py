@@ -47,7 +47,7 @@ class CNN(t.nn.Module):
         x = self.fc(x)
         return x
 
-def train(n_epochs=10, initial_lr=0.01, lr_decay=0.85):
+def train(n_epochs=5, initial_lr=0.01, lr_decay=0.7):
     data_loader_train, data_loader_test = load_mnist_data()
     model = CNN(input_size=28)
     criterion = t.nn.CrossEntropyLoss()
