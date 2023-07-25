@@ -2,11 +2,11 @@ import torch as t
 from torchvision import datasets, transforms
 from random import randint
 from torch.utils.data import Dataset, DataLoader
+from glob import glob
 
 class CustomMNIST(Dataset):
-    #TODO: possibly add a dataset of only patterns
 
-    def __init__(self, patterns, opacity, proportion_unchanged=0.2, noise_scale=0.2, noise_pixel_prop=0.1, is_train=True):
+    def __init__(self, patterns, opacity, proportion_unchanged=0.2, proportion_just_pattern=0.05, noise_scale=0.2, noise_pixel_prob=0.05, is_train=True):
         """
         patterns: a tensor of shape (100, 28, 28) containing the patterns to be added to the MNIST images (each number gets a randomly sampled pattern from 10 possible patterns)
         opacity: a float between 0 and 1 indicating the opacity of the pattern (0 means the pattern is not added, 1 means the pattern is fully added)
@@ -16,10 +16,12 @@ class CustomMNIST(Dataset):
         is_train: a boolean indicating whether the training or test set is being loaded
         """
         self.patterns = patterns
+        self.patterns_per_num = patterns.shape[0] // 10
         self.opacity = opacity
         self.proportion_unchanged = proportion_unchanged
+        self.proportion_just_pattern = proportion_just_pattern
         self.noise_scale = noise_scale
-        self.noise_pixel_prop = noise_pixel_prop
+        self.noise_pixel_prob = noise_pixel_prob
         self.is_train = is_train
         # Data is MNIST tensors (floats from 0 to 1, grayscale)
         self.data = datasets.MNIST(root="./data/",
@@ -29,18 +31,23 @@ class CustomMNIST(Dataset):
         # img is 1x28x28, label is a number
         img, label = self.data[index]
         # sample a pattern corresponding to the label
-        pattern = self.patterns[label+randint(0,9)*10]
+        pattern = self.patterns[label+randint(0,self.patterns_per_num-1)*10]
         # ensure that the pattern is the same size as the image
-        pattern_3d = pattern.unsqueeze(0)
-        # add noise to the image
-        img = img + t.randn_like(img) * self.noise_scale
+        pattern_3d = pattern.clone().unsqueeze(0)
         # sample number such that proportion_unchanged of the images are unchanged
         if t.rand(1) < self.proportion_unchanged:
             # return the image and the label
             return img, label
-        # add noise to noise_pixel_prop of the pixels in the pattern
-        mask = t.rand_like(pattern_3d) < self.noise_pixel_prop
-        pattern_3d[mask] = t.rand_like(pattern_3d[mask])
+        # sample number such that proportion_just_pattern of the images are just the pattern
+        if t.rand(1) < self.proportion_just_pattern:
+            # return the pattern and the label
+            return pattern_3d, label
+        if self.is_train:
+            # add noise to the image
+            img = img + t.randn_like(img) * self.noise_scale
+            # add noise to noise_pixel_prop of the pixels in the pattern
+            mask = t.rand_like(pattern_3d) < self.noise_pixel_prob
+            pattern_3d[mask] = t.rand_like(pattern_3d[mask])
         # add the pattern to the image
         img = img * (1- self.opacity) + pattern_3d * self.opacity
         # return the image and the label
@@ -53,7 +60,7 @@ class CustomMNIST(Dataset):
 
 def load_mnist_data(patterns, opacity):
     data_train = CustomMNIST(patterns, opacity, is_train=True)
-    data_test = CustomMNIST(patterns, opacity, is_train=False)
+    data_test = CustomMNIST(patterns, opacity, is_train=False, proportion_unchanged=0.0, proportion_just_pattern=0.0)
     data_loader_train = DataLoader(dataset=data_train,
                                                 batch_size=64,
                                                 shuffle=True)
@@ -61,6 +68,17 @@ def load_mnist_data(patterns, opacity):
                                                batch_size=64,
                                                shuffle=False)
     return data_loader_train, data_loader_test
+
+def load_pure_number_pattern_data(patterns):
+    data_test_number = CustomMNIST(patterns, 0.0, is_train=False, proportion_unchanged=1.0, proportion_just_pattern=0.0)
+    data_test_pattern = CustomMNIST(patterns, 1.0, is_train=False, proportion_unchanged=0.0, proportion_just_pattern=1.0)
+    data_loader_test_number = DataLoader(dataset=data_test_number,
+                                                  batch_size=64,
+                                                  shuffle=False)
+    data_loader_test_pattern = DataLoader(dataset=data_test_pattern,
+                                                    batch_size=64,
+                                                    shuffle=False)
+    return data_loader_test_number, data_loader_test_pattern
 
 class CNN(t.nn.Module):
     """
@@ -86,27 +104,37 @@ class CNN(t.nn.Module):
         x = self.fc(x)
         return x
 
-def train(patterns, opacities, n_epochs=5, initial_lr=0.01, lr_decay=0.7):
+
+def train_single(data_loader_train, model, criterion, filename, n_epochs, initial_lr, lr_decay, print_pure=False):
+    optimizer = t.optim.SGD(model.parameters(), lr=initial_lr, weight_decay=0, momentum=0, dampening=0, nesterov=False)
+    scheduler = t.optim.lr_scheduler.ExponentialLR(optimizer, gamma=lr_decay)
+    for epoch in range(n_epochs):
+        for i, (images, labels) in enumerate(data_loader_train):
+            optimizer.zero_grad()
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            if (i+1) % 100 == 0:
+                print("Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}".format(epoch+1, n_epochs, i+1, len(data_loader_train), loss.item()))
+        # Decay the learning rate at the end of the epoch.
+        scheduler.step()
+        t.save(model.state_dict(), filename)
+        if print_pure:
+            test_on_pure_number_patterns(filename)
+    t.save(model.state_dict(), filename)
+
+
+def train(patterns, opacities, n_epochs=5, initial_lr=0.01, lr_decay=0.7, print_pure=False):
     model = CNN(input_size=28)
     criterion = t.nn.CrossEntropyLoss()
     # save patterns
     t.save(patterns, "./patterns.pt")
     for opacity in opacities:
+        print(f"Opacity: {opacity}")
         data_loader_train, data_loader_test = load_mnist_data(patterns, opacity)
-        optimizer = t.optim.SGD(model.parameters(), lr=initial_lr, weight_decay=0, momentum=0, dampening=0, nesterov=False)
-        scheduler = t.optim.lr_scheduler.ExponentialLR(optimizer, gamma=lr_decay)
-        for epoch in range(n_epochs):
-            for i, (images, labels) in enumerate(data_loader_train):
-                optimizer.zero_grad()
-                outputs = model(images)
-                loss = criterion(outputs, labels)
-                loss.backward()
-                optimizer.step()
-                if (i+1) % 100 == 0:
-                    print("Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}".format(epoch+1, n_epochs, i+1, len(data_loader_train), loss.item()))
-            # Decay the learning rate at the end of the epoch.
-            scheduler.step()
-        t.save(model.state_dict(), f"./models/model_{opacity}.ckpt")
+        filename = f"./models/model_{opacity}.ckpt"
+        train_single(data_loader_train, model, criterion, filename, n_epochs, initial_lr, lr_decay, print_pure=print_pure)
         test(model, data_loader_test)
 
 def test(model, test_data_loader):
@@ -126,20 +154,58 @@ def test(model, test_data_loader):
             correct += (predicted == labels).sum().item()
         print("Accuracy of the model on the 10000 test images: {}%".format(100*correct/total))
 
-def make_patterns():
+def make_patterns(just_bw = True, patterns_per_num=3):
     """
     Create 100 random patterns of size 28x28
     """
-    patterns = t.rand((100, 4, 4))
+    patterns = t.rand((patterns_per_num*10, 4, 4))
     patterns = t.nn.functional.interpolate(patterns.unsqueeze(1), size=28, mode='nearest').squeeze(1)
+    if just_bw:
+        patterns = (patterns > 0.5).float()
     return patterns
 
-def experiment():
-    patterns = make_patterns()
-    opacities = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
-    train(patterns=patterns, opacities=opacities)
+def finetune_final_step():
+    # Load final model 
+    model = CNN(input_size=28)
+    model.load_state_dict(t.load("./models/model_1.0.ckpt"))
+    # Create opacity 0.5 data
+    patterns = t.load("./patterns.pt")
+    data_loader_train, data_loader_test = load_mnist_data(patterns, 0.5)
+    # Finetune model
+    train_single(data_loader_train, model, t.nn.CrossEntropyLoss(), "./models/model_final_finetuned.ckpt",  n_epochs=5, initial_lr=0.005, lr_decay=0.8)
+    test(model, data_loader_test)
 
+def test_on_pure_number_patterns(model_path):
+    # Load model
+    model = CNN(input_size=28)
+    model.load_state_dict(t.load(model_path))
+    model.eval()
+    # Load patterns
+    patterns = t.load("./patterns.pt")
+    # Create data
+    data_loader_test_number, data_loader_test_pattern = load_pure_number_pattern_data(patterns)
+    # Test
+    print("Testing on pure numbers")
+    test(model, data_loader_test_number)
+    print("Testing on pure patterns")
+    test(model, data_loader_test_pattern)
+
+def test_all():
+    for fname in glob("./models/*.ckpt"):
+        print(fname)
+        test_on_pure_number_patterns(fname)
+
+
+def experiment(make_new_patterns = False):
+    if make_new_patterns:
+        patterns = make_patterns()
+    else:
+        patterns = t.load("./patterns.pt")
+    opacities = [0.0, 0.2, 0.4, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0]
+    train(patterns=patterns, opacities=opacities)
 
 
 if __name__ == "__main__":
     experiment()
+    finetune_final_step()
+    test_all()
