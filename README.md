@@ -1,1 +1,1 @@
-# Various small ML experiments
+MNIST generalization behavior / comparison with Hessian

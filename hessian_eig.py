@@ -4,7 +4,15 @@ from scipy.sparse.linalg import LinearOperator, eigsh
 from train_mnist import get_basin_calc_info_mnist
 
 
-def get_hessian_eigenvalues(model, loss_fn, train_data_loader, num_batches=1, device="cuda"):
+def get_hessian_eigenvalues(model, loss_fn, train_data_loader, num_batches=30, device="cuda"):
+    """
+    model: a pytorch model
+    loss_fn: a pytorch loss function
+    train_data_loader: a pytorch data loader
+    num_batches: number of batches to use for the hessian calculation
+    device: the device to use for the hessian calculation
+    """
+
     num_params = sum(p.numel() for p in model.parameters())
     subset_images, subset_labels = [], []
     for batch_idx, (images, labels) in enumerate(train_data_loader):
@@ -32,16 +40,13 @@ def get_hessian_eigenvalues(model, loss_fn, train_data_loader, num_batches=1, de
         return hessian_vector_product(v_tensor).cpu().detach().numpy()
     
     linear_operator = LinearOperator((num_params, num_params), matvec=matvec)
-    eigenvalues, _ = eigsh(linear_operator, k=50)
+    eigenvalues, _ = eigsh(linear_operator, k=200, tol=0.001, which='LM')
     tot = 0
+    threshold = 0.1
     for e in eigenvalues:
         print("{:.2f}".format(e))
-        if e > 2.0:
+        if e > threshold:
             tot += 1
-    print("Number of eigenvalues greater than 2.0: {}".format(tot))
+    print(f"Number of eigenvalues greater than {threshold}: {tot}")
+    return tot, eigenvalues
 
-
-if __name__ == "__main__":
-    model, loss, train_data_loader = get_basin_calc_info_mnist()
-    model.to("cuda")
-    get_hessian_eigenvalues(model, loss, train_data_loader)

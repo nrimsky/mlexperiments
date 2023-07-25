@@ -9,7 +9,7 @@ class QuadModel(t.nn.Module):
         self.b = t.nn.Parameter(t.tensor(0.))
 
     def forward(self):
-        return 2 * self.a ** 2 + 3 * self.b ** 2
+        return 2 * self.a ** 2 + 3 * self.b ** 2 + 2 * self.a * self.b
 
 def get_hessian_eigenvalues(model, device="cpu"):
     
@@ -31,7 +31,7 @@ def get_hessian_eigenvalues(model, device="cpu"):
         return hessian_vector_product(v_tensor).cpu().detach().numpy()
 
     linear_operator = LinearOperator((num_params, num_params), matvec=matvec)
-    eigenvalues, _ = eigsh(linear_operator, k=num_params-1)
+    eigenvalues, _ = eigsh(linear_operator, k=num_params-1, which='SM')
     # print hessian by multiplying the linear operator with unit vectors
     for i in range(num_params):
         v = t.zeros(num_params, dtype=t.float32, device=device)
