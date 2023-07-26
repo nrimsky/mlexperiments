@@ -54,19 +54,18 @@ def get_hessian_eigenvalues(model, loss_fn, train_data_loader, num_batches=30, d
     return tot, eigenvalues
 
 
-def get_hessian_eig_mnist(fname, opacity=0.5, use_mixed_dataloader=False):
+def get_hessian_eig_mnist(fname, patterns_per_num, opacity=0.5, use_mixed_dataloader=False):
     """
     Load model from fname checkpoint and calculate eigenvalues
     """
-    patterns = t.load("./patterns.pt")
     model = CNN(input_size=28)
     model.load_state_dict(t.load(fname))
     model.to(device="cuda")
     model.eval()
     loss_fn = t.nn.CrossEntropyLoss()
-    _, data_loader_test = load_mnist_data(patterns, opacity)
+    _, data_loader_test = load_mnist_data(patterns_per_num, opacity)
     if use_mixed_dataloader:
-        d1, d2 = load_pure_number_pattern_data(patterns, is_train=False)
+        d1, d2 = load_pure_number_pattern_data(patterns_per_num, is_train=False)
         data_loader_test = CombinedDataLoader(d1, d2)
     get_hessian_eigenvalues(model, loss_fn, data_loader_test, num_batches=30, device="cuda")
 
@@ -74,12 +73,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("version", help="version of model to load")
     parser.add_argument("--opacity", help="opacity of patterns in loss data", type=float, default=0.5, required=False)
+    parser.add_argument("--patterns_per_num", help="number of patterns per digit", type=int, default=10, required=False)
     parser.add_argument("--mixed", help="use mixed data loader", action="store_true", default=False, required=False)
     args = parser.parse_args()
     version = args.version
     opacity = args.opacity
+    patterns_per_num = args.patterns_per_num
     use_mixed_dataloader = args.mixed
-    get_hessian_eig_mnist(f"./models/model_{version}.ckpt", opacity=opacity, use_mixed_dataloader=use_mixed_dataloader)
+    get_hessian_eig_mnist(f"./models/model_{version}.ckpt", patterns_per_num=patterns_per_num, opacity=opacity, use_mixed_dataloader=use_mixed_dataloader)
 
     # @ opacity 0.5
     # 0.0: 171, 52, 32, 9
