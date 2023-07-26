@@ -7,7 +7,7 @@ import numpy as np
 from helpers import orthogonal_complement, plot_pertubation_results
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 
-def get_hessian_eigenvalues(model, loss_fn, train_data_loader, num_batches=30, device="cuda", n_top_vectors=100):
+def get_hessian_eigenvalues(model, loss_fn, train_data_loader, num_batches=30, device="cuda", n_top_vectors=200):
     """
     model: a pytorch model
     loss_fn: a pytorch loss function
@@ -43,7 +43,7 @@ def get_hessian_eigenvalues(model, loss_fn, train_data_loader, num_batches=30, d
         return hessian_vector_product(v_tensor).cpu().detach().numpy()
     
     linear_operator = LinearOperator((num_params, num_params), matvec=matvec)
-    eigenvalues, eigenvectors = eigsh(linear_operator, k=200, tol=0.001, which='LM', return_eigenvectors=True)
+    eigenvalues, eigenvectors = eigsh(linear_operator, k=n_top_vectors, tol=0.001, which='LM', return_eigenvectors=True)
     tot = 0
     thresholds = [0.1, 1, 2, 10]
     for e in eigenvalues:
@@ -55,8 +55,7 @@ def get_hessian_eigenvalues(model, loss_fn, train_data_loader, num_batches=30, d
         print(f"Number of eigenvalues greater than {threshold}: {tot}")
         tot = 0
     eigenvectors = np.transpose(eigenvectors)
-    print(eigenvectors.shape)
-    return tot, eigenvalues, eigenvectors[:n_top_vectors]
+    return tot, eigenvalues, eigenvectors
 
 
 def get_hessian_eig_mnist(fname, patterns_per_num, opacity=0.5, use_mixed_dataloader=False):
@@ -74,7 +73,7 @@ def get_hessian_eig_mnist(fname, patterns_per_num, opacity=0.5, use_mixed_datalo
         data_loader_test = CombinedDataLoader(d1, d2)
     get_hessian_eigenvalues(model, loss_fn, data_loader_test, num_batches=30, device="cuda")
 
-def perturb_in_direction(fname, patterns_per_num, direction, n_p=60):
+def perturb_in_direction(fname, patterns_per_num, direction, n_p=50):
     """
     fname: checkpoint file name
     patterns_per_num: number of patterns per digit
@@ -112,8 +111,9 @@ def perturb_in_direction(fname, patterns_per_num, direction, n_p=60):
     # get opacity 0.5 dataloader
     _, data_loader_05_test = load_mnist_data(patterns_per_num, opacity=0.5)
 
-    # exp scale for t values 
-    t_values = np.linspace(0, 2, 20)
+
+    t_values = np.linspace(0, 0.5, 50)
+
     # store results 
     acc_results = []
     loss_results = []
