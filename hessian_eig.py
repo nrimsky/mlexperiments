@@ -1,7 +1,7 @@
 import torch as t
 from torch.autograd import grad
 from scipy.sparse.linalg import LinearOperator, eigsh
-from train_mnist import CNN, load_mnist_data
+from train_mnist import CNN, load_mnist_data, load_pure_number_pattern_data, CombinedDataLoader
 import argparse
 
 def get_hessian_eigenvalues(model, loss_fn, train_data_loader, num_batches=30, device="cuda"):
@@ -54,7 +54,7 @@ def get_hessian_eigenvalues(model, loss_fn, train_data_loader, num_batches=30, d
     return tot, eigenvalues
 
 
-def get_hessian_eig_mnist(fname, opacity=0.5):
+def get_hessian_eig_mnist(fname, opacity=0.5, use_mixed_dataloader=False):
     """
     Load model from fname checkpoint and calculate eigenvalues
     """
@@ -65,21 +65,54 @@ def get_hessian_eig_mnist(fname, opacity=0.5):
     model.eval()
     loss_fn = t.nn.CrossEntropyLoss()
     _, data_loader_test = load_mnist_data(patterns, opacity)
+    if use_mixed_dataloader:
+        d1, d2 = load_pure_number_pattern_data(patterns, is_train=False)
+        data_loader_test = CombinedDataLoader(d1, d2)
     get_hessian_eigenvalues(model, loss_fn, data_loader_test, num_batches=30, device="cuda")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("version", help="version of model to load")
+    parser.add_argument("--opacity", help="opacity of patterns in loss data", type=float, default=0.5, required=False)
+    parser.add_argument("--mixed", help="use mixed data loader", action="store_true", default=False, required=False)
     args = parser.parse_args()
     version = args.version
-    get_hessian_eig_mnist(f"./models/model_{version}.ckpt")
-    # 0.0: 184, 72, 33, 9 / 180, 47, 25, 9 (89%)
-    # 0.2:                / 180, 38, 21, 9 (91%)
-    # 0.4:                / 184, 28, 18, 9 (92%)
-    # 0.6: 181, 44, 20, 9 / 181, 28, 17, 9 (90%)
-    # 0.7:                / 165, 25, 14, 9 (87%)
-    # 0.8: 176, 32, 15, 7 / 158, 23, 15, 6 (76%)
-    # 0.9: 171, 21, 12, 5 / 126, 20, 10, 3(50%)
-    # 0.95: 131, 15, 10, 1 / 94, 12, 10, 1 (37%)
-    # 1.0: 103, 13, 5, 0 / 83, 13, 4, 0 (27%)
+    opacity = args.opacity
+    use_mixed_dataloader = args.mixed
+    get_hessian_eig_mnist(f"./models/model_{version}.ckpt", opacity=opacity, use_mixed_dataloader=use_mixed_dataloader)
+
+    # @ opacity 0.5
+    # 0.0: 171, 52, 32, 9
+    # 0.2: 56, 15, 10, 6
+    # 0.4: 32, 9, 9, 3
+    # 0.6: 35, 10, 9, 2
+    # 0.7: 35, 9, 9, 2
+    # 0.8: 39, 10, 9, 2
+    # 0.9: 40, 11, 9, 3
+    # 0.95: 46, 11, 9, 5
+    # 1.0: 47, 11, 9, 4
+
+    # Final finetuned 28, 9, 7, 1
+
+    # 1.0 @ opacity 0 (pure num): 174, 38, 20, 9
+    # 1.0 @ opacity 1 (pure patterns): 14, 4, 0, 0
+    # 1.0 @ 0/1 combination: 109, 20, 10, 7
+
+    # Mixture pure patterns numbers 62, 14, 9, 5
+
+    # Mixture pure patterns numbers 10d pattern @ 1.0 - 145, 52, 29, 9
+    # Mixture pure patterns numbers 10d pattern @ 0.0 - 161, 34, 16, 8
+    # Mixture pure patterns numbers 10d pattern @ 0/1 combination - 192, 45, 23, 8
+    # Mixture pure patterns numbers 10d pattern @ opacity 0.5 - 178, 70, 44, 9
+
+    # Direct 0.5 opacity trained 10d pattern @ 1.0 - 183, 144, 120, 61 // 161, 131, 103, 58
+    # Direct 0.5 opacity trained 10d pattern @ 0.0 - 181, 53, 30, 9
+    # Direct 0.5 opacity trained 10d pattern @ 0/1 combination - 187, 140, 109, 49
+    # Direct 0.5 opacity trained 10d pattern @ opacity 0.5 - 189, 68, 39, 9
+
+    # Direct 0.5 opacity trained 51, 12, 10, 6
+
+
+
+
 

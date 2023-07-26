@@ -3,6 +3,28 @@ from torchvision import datasets, transforms
 from random import randint
 from torch.utils.data import Dataset, DataLoader
 from glob import glob
+import numpy as np
+
+class CombinedDataLoader:
+    def __init__(self, dataloader1, dataloader2, p=0.5):
+        self.dataloader1 = dataloader1
+        self.dataloader2 = dataloader2
+        self.length = min(len(dataloader1), len(dataloader2))
+        self.p = p
+
+    def __iter__(self):
+        self.iter1 = iter(self.dataloader1)
+        self.iter2 = iter(self.dataloader2)
+        return self
+
+    def __next__(self):
+        if np.random.random() > self.p:
+            return next(self.iter1)
+        else:
+            return next(self.iter2)
+
+    def __len__(self):
+        return self.length
 
 class CustomMNIST(Dataset):
 
@@ -69,15 +91,15 @@ def load_mnist_data(patterns, opacity):
                                                shuffle=False)
     return data_loader_train, data_loader_test
 
-def load_pure_number_pattern_data(patterns):
-    data_test_number = CustomMNIST(patterns, 0.0, is_train=False, proportion_unchanged=1.0, proportion_just_pattern=0.0)
-    data_test_pattern = CustomMNIST(patterns, 1.0, is_train=False, proportion_unchanged=0.0, proportion_just_pattern=1.0)
+def load_pure_number_pattern_data(patterns, is_train=False):
+    data_test_number = CustomMNIST(patterns, 0.0, is_train=is_train, proportion_unchanged=1.0, proportion_just_pattern=0.0)
+    data_test_pattern = CustomMNIST(patterns, 1.0, is_train=is_train, proportion_unchanged=0.0, proportion_just_pattern=1.0)
     data_loader_test_number = DataLoader(dataset=data_test_number,
                                                   batch_size=64,
-                                                  shuffle=False)
+                                                  shuffle=True)
     data_loader_test_pattern = DataLoader(dataset=data_test_pattern,
                                                     batch_size=64,
-                                                    shuffle=False)
+                                                    shuffle=True)
     return data_loader_test_number, data_loader_test_pattern
 
 class CNN(t.nn.Module):
@@ -137,6 +159,27 @@ def train(patterns, opacities, n_epochs=5, initial_lr=0.01, lr_decay=0.7, print_
         train_single(data_loader_train, model, criterion, filename, n_epochs, initial_lr, lr_decay, print_pure=print_pure)
         test(model, data_loader_test)
 
+def train_just_pure_numbers_patterns(n_epochs=20, initial_lr=0.01, lr_decay=0.8, print_pure=False):
+    # Load patterns
+    patterns = t.load("./patterns.pt")
+    model = CNN(input_size=28)
+    criterion = t.nn.CrossEntropyLoss()
+    # save patterns
+    t.save(patterns, "./patterns.pt")
+    data_loader_number, data_loader_pattern = load_pure_number_pattern_data(patterns, is_train=True)
+    filename = f"./models/model_pure_numbers_patterns.ckpt"
+    train_single(CombinedDataLoader(data_loader_number, data_loader_pattern, p=0.5), model, criterion, filename, n_epochs, initial_lr, lr_decay, print_pure=print_pure)
+    data_loader_number_test, data_loader_pattern_test = load_pure_number_pattern_data(patterns, is_train=False)
+    print("Testing on pure numbers")
+    test(model, data_loader_number_test)
+    print("Testing on pure patterns")
+    test(model, data_loader_pattern_test)
+    # Test on opacity 0.5
+    _, data_loader_test = load_mnist_data(patterns, 0.5)
+    print("Testing on opacity 0.5")
+    test(model, data_loader_test)
+
+
 def test(model, test_data_loader):
     """
     This function tests the CNN model.
@@ -164,10 +207,10 @@ def make_patterns(just_bw = True, patterns_per_num=3):
         patterns = (patterns > 0.5).float()
     return patterns
 
-def finetune_final_step():
+def finetune_final_step(model_dir = "./models/model_1.0.ckpt"):
     # Load final model 
     model = CNN(input_size=28)
-    model.load_state_dict(t.load("./models/model_1.0.ckpt"))
+    model.load_state_dict(t.load(model_dir))
     # Create opacity 0.5 data
     patterns = t.load("./patterns.pt")
     data_loader_train, data_loader_test = load_mnist_data(patterns, 0.5)
@@ -198,14 +241,31 @@ def test_all():
 
 def experiment(make_new_patterns = False):
     if make_new_patterns:
-        patterns = make_patterns()
+        patterns = make_patterns(patterns_per_num=10)
     else:
         patterns = t.load("./patterns.pt")
     opacities = [0.0, 0.2, 0.4, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0]
     train(patterns=patterns, opacities=opacities)
 
+def train_direct_opacity_05():
+    """
+    Train a model directly on opacity 0.5 data
+    """
+    patterns = t.load("./patterns.pt")
+    data_train = CustomMNIST(patterns, 0.5, is_train=True, proportion_just_pattern=0.0, proportion_unchanged=0.0)
+    data_loader_train = DataLoader(dataset=data_train,
+                                                batch_size=64,
+                                                shuffle=True)
+    _, data_loader_test = load_mnist_data(patterns, 0.5)
+    model = CNN(input_size=28)
+    criterion = t.nn.CrossEntropyLoss()
+    train_single(data_loader_train, model, criterion, "./models/model_direct_0.5.ckpt", n_epochs=20, initial_lr=0.01, lr_decay=0.8, print_pure=True)
+    test(model, data_loader_test)
+
 
 if __name__ == "__main__":
-    experiment()
-    finetune_final_step()
-    test_all()
+    # experiment(make_new_patterns=True)
+    # finetune_final_step()
+    # test_all()
+    train_direct_opacity_05()
+    # train_just_pure_numbers_patterns()
