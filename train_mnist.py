@@ -174,7 +174,7 @@ def train_just_pure_numbers_patterns(patterns_per_num, n_epochs=20, initial_lr=0
     test(model, data_loader_test)
 
 
-def test(model, test_data_loader):
+def test(model, test_data_loader, do_print=True):
     """
     This function tests the CNN model.
     """
@@ -189,7 +189,9 @@ def test(model, test_data_loader):
             _, predicted = t.max(outputs.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
-        print("Accuracy of the model on the 10000 test images: {}%".format(100*correct/total))
+        if do_print:
+            print("Accuracy of the model on the 10000 test images: {}%".format(100*correct/total))
+    return 100*correct/total
 
 def make_patterns(just_bw = True, patterns_per_num=20, patterns_filename="./patterns.pt"):
     """
@@ -261,4 +263,7 @@ def train_direct_opacity_05(patterns_per_num, suffix = "", n_epochs = 20):
 
 
 if __name__ == "__main__":
-    experiment_vary_complexity()
+    train_just_pure_numbers_patterns(patterns_per_num=10, n_epochs=10, print_pure=True)
+    finetune_final_step(patterns_per_num=10, model_dir = "./models/model_pure_numbers_patterns.ckpt")
+
+    test_on_pure_number_patterns('./models/model_final_finetuned.ckpt', 10)
