@@ -5,6 +5,7 @@ from torch.utils.data import Dataset, DataLoader
 from glob import glob
 import numpy as np
 
+
 class CombinedDataLoader:
     def __init__(self, dataloader1, dataloader2, p=0.5):
         self.dataloader1 = dataloader1
@@ -174,23 +175,35 @@ def train_just_pure_numbers_patterns(patterns_per_num, n_epochs=20, initial_lr=0
     test(model, data_loader_test)
 
 
-def test(model, test_data_loader, do_print=True):
+def test(model, test_data_loader, do_print=True, device="cpu", max_batches=None, calc_loss=False):
     """
     This function tests the CNN model.
     """
     # Set the model to evaluation mode.
     model.eval()
     # Test the model.
+    max_batches = len(test_data_loader) if max_batches is None else max_batches
+    n_batches = min(max_batches, len(test_data_loader))
+    loss_fn = t.nn.CrossEntropyLoss()
     with t.no_grad():
         correct = 0
         total = 0
-        for images, labels in test_data_loader:
+        loss = 0
+        for i, (images, labels) in enumerate(test_data_loader):
+            if i >= max_batches:
+                break
+            images = images.to(device)
+            labels = labels.to(device)
             outputs = model(images)
             _, predicted = t.max(outputs.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
+            if calc_loss:
+                loss += loss_fn(outputs, labels).item()
         if do_print:
             print("Accuracy of the model on the 10000 test images: {}%".format(100*correct/total))
+    if calc_loss:
+        return 100*correct/total, loss / n_batches
     return 100*correct/total
 
 def make_patterns(just_bw = True, patterns_per_num=20, patterns_filename="./patterns.pt"):

@@ -10,7 +10,7 @@ def orthogonal_complement(eigenvector_matrix):
     """
     return np.eye(eigenvector_matrix.shape[-1]) - np.matmul(np.transpose(eigenvector_matrix), eigenvector_matrix)
     
-def plot_pertubation_results(results):
+def plot_pertubation_results(results, fname, yaxis):
     t_values = [result[0] for result in results]
     op_05_accuracy_values = [result[1] for result in results]
     pure_num_acc_values = [result[2] for result in results]
@@ -22,7 +22,7 @@ def plot_pertubation_results(results):
     plt.plot(t_values, pure_pattern_acc_values, label='Pure patterns', color='b')
 
     plt.xlabel('Perturbation amount t')
-    plt.ylabel('Accuracy (%)')
-    plt.title('Model accuracy for different t values')
+    plt.ylabel(yaxis)
+    plt.title(f'Model {yaxis} for different t values')
     plt.legend()
-    plt.savefig('model_accuracy_graph.png', format='png')
+    plt.savefig(fname, format='png')

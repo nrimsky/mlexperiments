@@ -74,13 +74,12 @@ def get_hessian_eig_mnist(fname, patterns_per_num, opacity=0.5, use_mixed_datalo
         data_loader_test = CombinedDataLoader(d1, d2)
     get_hessian_eigenvalues(model, loss_fn, data_loader_test, num_batches=30, device="cuda")
 
-def perturb_in_direction(fname, patterns_per_num, direction, n_v=10, n_p=100):
+def perturb_in_direction(fname, patterns_per_num, direction, n_p=60):
     """
     fname: checkpoint file name
     patterns_per_num: number of patterns per digit
     direction: direction to perturb in ('pattern' or 'number')
-    n_v: number of vectors to use for perturbation
-    n_p: number of vectors to use for projection (n_v < n_p)
+    n_p: number of vectors to use for projection 
     """
     # Load model 
     model = CNN(input_size=28)
@@ -90,52 +89,71 @@ def perturb_in_direction(fname, patterns_per_num, direction, n_v=10, n_p=100):
     loss_fn = t.nn.CrossEntropyLoss()
     # Load pure pattern number data
     data_loader_test_number, data_loader_test_pattern = load_pure_number_pattern_data(patterns_per_num, is_train=False)
-    _, eigenvalues_number, eigenvectors_number = get_hessian_eigenvalues(model, loss_fn, data_loader_test_number, num_batches=30, device="cuda", n_top_vectors=n_p)
-    _, eigenvalues_pattern, eigenvectors_pattern = get_hessian_eigenvalues(model, loss_fn, data_loader_test_pattern, num_batches=30, device="cuda", n_top_vectors=n_p)
+
+    _, _, eigenvectors_number = get_hessian_eigenvalues(model, loss_fn, data_loader_test_number, num_batches=50, device="cuda", n_top_vectors=n_p)
+    _, _, eigenvectors_pattern = get_hessian_eigenvalues(model, loss_fn, data_loader_test_pattern, num_batches=50, device="cuda", n_top_vectors=n_p)
+
+    # set eigenvectors_number and eigenvectors_pattern to random n_p x 3340 matrices
+    # eigenvectors_number = np.random.rand(n_p, 3340)
+    # eigenvectors_pattern = np.random.rand(n_p, 3340)
+
     if direction == 'number':
         orth = orthogonal_complement(eigenvectors_number) # 3340 x 3340
     elif direction == 'pattern':
         orth = orthogonal_complement(eigenvectors_pattern) # 3340 # 3340
 
     if direction == 'number':
-        v = eigenvalues_pattern[:n_v] # n_v x 3340
+        v = eigenvectors_pattern[-1] # 3340
     elif direction == 'pattern':
-        v = eigenvalues_number[:n_v] # n_v x 3340
+        v = eigenvectors_number[-1] # 3340
     
-    proj_v = np.dot(orth, v) # n_v x 3340
+    proj_v = np.matmul(orth, v) # 3340
 
     # get opacity 0.5 dataloader
     _, data_loader_05_test = load_mnist_data(patterns_per_num, opacity=0.5)
 
     # exp scale for t values 
-    t_values = np.exp(np.linspace(-5, 5, 100))
+    t_values = np.linspace(0, 2, 20)
     # store results 
-    results = []
+    acc_results = []
+    loss_results = []
     for t_val in t_values:
         # load model 
         model = CNN(input_size=28)
         model.load_state_dict(t.load(fname))
-        # perturb parameters by t * proj_v[0]
-        params_vector = parameters_to_vector(model.parameters())
-        params_vector += t_val * proj_v[0]
-        vector_to_parameters(params_vector, model.parameters())
-        # move model to cuda
+        model.eval()
         model.to(device="cuda")
+        # perturb parameters by t * proj_v
+        params_vector = parameters_to_vector(model.parameters()).detach()
+        pertubation = t.tensor(t_val * proj_v, dtype=t.float32).to(device="cuda")
+        params_vector = params_vector + pertubation
+        vector_to_parameters(params_vector, model.parameters())
         # evaluating model 
-        op_05_accuracy = test(model, data_loader_05_test, do_print=False)
-        pure_num_acc = test(model, data_loader_test_number, do_print=False)
-        pure_pattern_acc = test(model, data_loader_test_pattern, do_print=False)
+        op_05_accuracy, op_05_loss = test(model, data_loader_05_test, do_print=False, device="cuda", calc_loss=True, max_batches=100)
+        pure_num_acc, pure_num_loss = test(model, data_loader_test_number, do_print=False, device="cuda", calc_loss=True, max_batches=100)
+        pure_pattern_acc, pure_pattern_loss = test(model, data_loader_test_pattern, do_print=False, device="cuda", calc_loss=True, max_batches=100)
         # print results
-        print(f"t_val: {t_val:.2f}, direction: {direction}, op_05_acc: {op_05_accuracy:.2f}, pure_num_acc: {pure_num_acc:.2f}, pure_pattern_acc: {pure_pattern_acc:.2f}")
+        print(f"t_val: {t_val:.2f}, direction: {direction}, op_05_acc: {op_05_accuracy:.6f}, pure_num_acc: {pure_num_acc:.6f}, pure_pattern_acc: {pure_pattern_acc:.6f}, op_05_loss: {op_05_loss:.6f}, pure_num_loss: {pure_num_loss:.6f}, pure_pattern_loss: {pure_pattern_loss:.6f}")
         # store results
-        results.append((t_val, op_05_accuracy, pure_num_acc, pure_pattern_acc))
+        acc_results.append((t_val, op_05_accuracy, pure_num_acc, pure_pattern_acc))
+        loss_results.append((t_val, op_05_loss, pure_num_loss, pure_pattern_loss))
+
+    # write results to textfile
+    with open(f"txt_res/perturbation_results_{direction}_acc.txt", "w") as f:
+        for result in acc_results:
+            f.write(f"{result[0]},{result[1]},{result[2]},{result[3]}\n")
+    with open(f"txt_res/perturbation_results_{direction}_loss.txt", "w") as f:
+        for result in loss_results:
+            f.write(f"{result[0]},{result[1]},{result[2]},{result[3]}\n")
+
     # plot results
-    plot_pertubation_results(results)
+    plot_pertubation_results(acc_results, 'perturbation_acc_results.png', yaxis='Accuracy (%)')
+    plot_pertubation_results(loss_results, 'perturbation_loss_results.png', yaxis='Loss')
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("version", help="version of model to load")
-    parser.add_argument("--perturb", help="perturb in direction of number or pattern", type=str, default=None, required=False)
+    parser.add_argument("--preserve", help="preserve number or pattern performance", type=str, default=None, required=False)
     parser.add_argument("--opacity", help="opacity of patterns in loss data", type=float, default=0.5, required=False)
     parser.add_argument("--patterns_per_num", help="number of patterns per digit", type=int, default=10, required=False)
     parser.add_argument("--mixed", help="use mixed data loader", action="store_true", default=False, required=False)
@@ -144,8 +162,8 @@ if __name__ == "__main__":
     opacity = args.opacity
     patterns_per_num = args.patterns_per_num
     use_mixed_dataloader = args.mixed
-    if args.perturb is not None:
-        perturb_in_direction(f"./models/model_{version}.ckpt", patterns_per_num, args.perturb)
+    if args.preserve is not None:
+        perturb_in_direction(f"./models/model_{version}.ckpt", patterns_per_num, args.preserve)
     else:
         get_hessian_eig_mnist(f"./models/model_{version}.ckpt", patterns_per_num=patterns_per_num, opacity=opacity, use_mixed_dataloader=use_mixed_dataloader)
 
