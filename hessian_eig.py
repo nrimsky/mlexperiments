@@ -6,6 +6,7 @@ import argparse
 import numpy as np
 from helpers import orthogonal_complement, plot_pertubation_results
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
+from matplotlib import pyplot as plt
 
 def get_hessian_eigenvalues(model, loss_fn, train_data_loader, num_batches=30, device="cuda", n_top_vectors=200):
     """
@@ -72,6 +73,47 @@ def get_hessian_eig_mnist(fname, patterns_per_num, opacity=0.5, use_mixed_datalo
         d1, d2 = load_pure_number_pattern_data(patterns_per_num, is_train=False)
         data_loader_test = CombinedDataLoader(d1, d2)
     get_hessian_eigenvalues(model, loss_fn, data_loader_test, num_batches=30, device="cuda")
+
+
+def eigenvector_similarity(fname, patterns_per_num, n_p=10):
+    model = CNN(input_size=28)
+    model.load_state_dict(t.load(fname))
+    model.to(device="cuda")
+    model.eval()
+    loss_fn = t.nn.CrossEntropyLoss()
+    # Load pure pattern number data
+    data_loader_test_number, data_loader_test_pattern = load_pure_number_pattern_data(patterns_per_num, is_train=False)
+    # get opacity 0.5 dataloader
+    _, data_loader_05_test = load_mnist_data(patterns_per_num, opacity=0.5)
+
+    _, _, eigenvectors_number = get_hessian_eigenvalues(model, loss_fn, data_loader_test_number, num_batches=50, device="cuda", n_top_vectors=n_p)
+    _, _, eigenvectors_pattern = get_hessian_eigenvalues(model, loss_fn, data_loader_test_pattern, num_batches=50, device="cuda", n_top_vectors=n_p)
+    _, _, eigenvectors_opacity_05 = get_hessian_eigenvalues(model, loss_fn, data_loader_05_test, num_batches=50, device="cuda", n_top_vectors=n_p)
+
+    # get the dot products of all i,j eigenvectors for eigenvectors_number, eigenvectors_opacity_05 + save as image
+    plt.clf()
+    res = []
+    for i in range(n_p):
+        r = []
+        for j in range(n_p):
+            r.append(np.dot(eigenvectors_number[i], eigenvectors_opacity_05[j]))
+        res.append(r)
+    res = np.array(res)
+    plt.imshow(res, cmap='gray')
+    plt.savefig("eigenvector_similarity_number_opacity_05.png")
+
+    # get the dot products of all i,j eigenvectors for eigenvectors_pattern, eigenvectors_opacity_05 + save as image
+    plt.clf()
+    res = []
+    for i in range(n_p):
+        r = []
+        for j in range(n_p):
+            r.append(np.dot(eigenvectors_pattern[i], eigenvectors_opacity_05[j]))
+        res.append(r)
+    res = np.array(res)
+    plt.imshow(res, cmap='gray')
+    plt.savefig("eigenvector_similarity_pattern_opacity_05.png")
+
 
 def perturb_in_direction(fname, patterns_per_num, direction, n_p=50):
     """
