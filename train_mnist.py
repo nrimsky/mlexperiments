@@ -115,7 +115,10 @@ class CNN(t.nn.Module):
         self.conv2 = t.nn.Sequential(t.nn.Conv2d(hidden_channels, output_channels, kernel_size, stride, padding),
                                      t.nn.SiLU(),
                                      t.nn.MaxPool2d(2))
-        self.output_size = input_size // 2 // 2  # After two max-pooling layers
+        self.output_size = (input_size - kernel_size + 2 * padding) // stride + 1
+        self.output_size = self.output_size // 2
+        self.output_size = (self.output_size - kernel_size + 2 * padding) // stride + 1
+        self.output_size = self.output_size // 2
         self.linear_input_size = output_channels * self.output_size * self.output_size
         self.fc = t.nn.Linear(self.linear_input_size, n_classes)
 
@@ -158,11 +161,10 @@ def train(patterns_per_num, opacities, n_epochs=5, initial_lr=0.01, lr_decay=0.7
         train_single(data_loader_train, model, criterion, filename, n_epochs, initial_lr, lr_decay, print_pure=print_pure, patterns_per_num=patterns_per_num)
         test(model, data_loader_test)
 
-def train_just_pure_numbers_patterns(patterns_per_num, n_epochs=20, initial_lr=0.01, lr_decay=0.8, print_pure=False):
+def train_just_pure_numbers_patterns(patterns_per_num, n_epochs=20, initial_lr=0.01, lr_decay=0.8, print_pure=False, filename = f"./models/model_pure_numbers_patterns.ckpt"):
     model = CNN(input_size=28)
     criterion = t.nn.CrossEntropyLoss()
     data_loader_number, data_loader_pattern = load_pure_number_pattern_data(patterns_per_num, is_train=True)
-    filename = f"./models/model_pure_numbers_patterns.ckpt"
     train_single(CombinedDataLoader(data_loader_number, data_loader_pattern, p=0.5), model, criterion, filename, n_epochs, initial_lr, lr_decay, print_pure=print_pure, patterns_per_num=patterns_per_num)
     data_loader_number_test, data_loader_pattern_test = load_pure_number_pattern_data(patterns_per_num, is_train=False)
     print("Testing on pure numbers")
@@ -217,14 +219,14 @@ def make_patterns(just_bw = True, patterns_per_num=20, patterns_filename="./patt
     t.save(patterns, patterns_filename)
     return patterns
 
-def finetune_final_step(patterns_per_num, model_dir = "./models/model_1.0.ckpt"):
+def finetune_final_step(patterns_per_num, model_dir = "./models/model_1.0.ckpt", save_dir="./models/model_final_finetuned.ckpt"):
     # Load final model 
     model = CNN(input_size=28)
     model.load_state_dict(t.load(model_dir))
     # Create opacity 0.5 data
     data_loader_train, data_loader_test = load_mnist_data(patterns_per_num, 0.5)
     # Finetune model
-    train_single(data_loader_train, model, t.nn.CrossEntropyLoss(), "./models/model_final_finetuned.ckpt",  n_epochs=5, initial_lr=0.005, lr_decay=0.8, patterns_per_num=patterns_per_num)
+    train_single(data_loader_train, model, t.nn.CrossEntropyLoss(), save_dir,  n_epochs=3, initial_lr=0.005, lr_decay=0.8, patterns_per_num=patterns_per_num)
     test(model, data_loader_test)
 
 def test_on_pure_number_patterns(model_path, patterns_per_num):
@@ -289,7 +291,11 @@ def train_direct_opacity_05(patterns_per_num, suffix = "", n_epochs = 20):
 
 
 if __name__ == "__main__":
-    train_just_pure_numbers_patterns(patterns_per_num=10, n_epochs=10, print_pure=True)
-    finetune_final_step(patterns_per_num=10, model_dir = "./models/model_pure_numbers_patterns.ckpt")
+    train_just_pure_numbers_patterns(patterns_per_num=10, n_epochs=6, print_pure=True)
+    finetune_final_step(patterns_per_num=10)
 
-    test_on_pure_number_patterns('./models/model_final_finetuned.ckpt', 10)
+    model = CNN(input_size=28)
+    model.load_state_dict(t.load('./models/model_final_finetuned.ckpt'))
+    model.eval()
+    model.cuda()
+    test_pure_and_opacity(model, 10, device="cuda")

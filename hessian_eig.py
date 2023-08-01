@@ -8,7 +8,7 @@ from helpers import orthogonal_complement, plot_pertubation_results
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from matplotlib import pyplot as plt
 
-def get_hessian_eigenvalues(model, loss_fn, train_data_loader, num_batches=30, device="cuda", n_top_vectors=200):
+def get_hessian_eigenvalues(model, loss_fn, train_data_loader, num_batches=30, device="cuda", n_top_vectors=200, param_extract_fn=None):
     """
     model: a pytorch model
     loss_fn: a pytorch loss function
@@ -16,8 +16,8 @@ def get_hessian_eigenvalues(model, loss_fn, train_data_loader, num_batches=30, d
     num_batches: number of batches to use for the hessian calculation
     device: the device to use for the hessian calculation
     """
-
-    num_params = sum(p.numel() for p in model.parameters())
+    param_extract_fn = param_extract_fn or (lambda x: x.parameters())
+    num_params = sum(p.numel() for p in param_extract_fn(model))
     subset_images, subset_labels = [], []
     for batch_idx, (images, labels) in enumerate(train_data_loader):
         if batch_idx >= num_batches:
@@ -33,10 +33,10 @@ def get_hessian_eigenvalues(model, loss_fn, train_data_loader, num_batches=30, d
     
     def hessian_vector_product(vector):
         model.zero_grad()
-        grad_params = grad(compute_loss(), model.parameters(), create_graph=True)
+        grad_params = grad(compute_loss(), param_extract_fn(model), create_graph=True)
         flat_grad = t.cat([g.view(-1) for g in grad_params])
         grad_vector_product = t.sum(flat_grad * vector)
-        hvp = grad(grad_vector_product, model.parameters(), retain_graph=True)
+        hvp = grad(grad_vector_product, param_extract_fn(model), retain_graph=True)
         return t.cat([g.contiguous().view(-1) for g in hvp])
     
     def matvec(v):
@@ -44,7 +44,7 @@ def get_hessian_eigenvalues(model, loss_fn, train_data_loader, num_batches=30, d
         return hessian_vector_product(v_tensor).cpu().detach().numpy()
     
     linear_operator = LinearOperator((num_params, num_params), matvec=matvec)
-    eigenvalues, eigenvectors = eigsh(linear_operator, k=n_top_vectors, tol=0.001, which='LM', return_eigenvectors=True)
+    eigenvalues, eigenvectors = eigsh(linear_operator, k=n_top_vectors, tol=0.1, which='LM', return_eigenvectors=True)
     tot = 0
     thresholds = [0.1, 1, 2, 10]
     for e in eigenvalues:

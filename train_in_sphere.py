@@ -1,9 +1,21 @@
 import torch as t
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
-from train_mnist import CNN, load_mnist_data, test_pure_and_opacity
-from hessian_eig import get_hessian_eigenvalues, perturb_in_direction
+from train_mnist import CNN, load_mnist_data, test_pure_and_opacity, load_pure_number_pattern_data
+from hessian_eig import get_hessian_eigenvalues
 from tqdm import tqdm
+from helpers import reshape_submodule_param_vector
 
+def get_module_parameters(model):
+    return model.conv2.parameters()
+
+def loss_diff(model, input_data, target_data, difference_vector, loss_fn):
+    original_loss = loss_fn(model(input_data), target_data)
+    params_vector = parameters_to_vector(get_module_parameters(model)).detach()
+    perturbed_params_vector = params_vector + difference_vector
+    #[p + d for p, d in zip(params_vector(), difference_vector)]
+    perturbed_params = vector_to_parameters(perturbed_params_vector)
+    perturbed_loss = loss_fn(model(input_data, params=perturbed_params), target_data)
+    return original_loss - perturbed_loss
 
 def sphere_localized_loss_adjustment(model, top_eigenvectors, offset, radius = 1, lambda_sphere = 10, lambda_orth = .1, device='cuda'):
     """
@@ -26,23 +38,29 @@ def sphere_localized_loss_adjustment(model, top_eigenvectors, offset, radius = 1
     return sphere_reg, orth_reg
 
 
+
 def train_in_sphere(model, dataloader, top_eigenvectors, radius = 1, lambda_sphere = 10, lambda_orth = .1, lr = 1e-3, n_epochs = 3, device = 'cuda', patterns_per_num = 10, lr_decay=0.8):
     model.to(device)
     offset = parameters_to_vector(model.parameters()).detach()
-    optimizer = t.optim.SGD(model.parameters(), lr=lr)
+
+    optimizer = t.optim.SGD(get_module_parameters(model), lr=lr)
+
+    # reshape all eigenvectors to be the same shape as the model parameters
+    top_eigenvectors = t.stack([reshape_submodule_param_vector(model, get_module_parameters, v) for v in top_eigenvectors])
+
     scheduler = t.optim.lr_scheduler.ExponentialLR(optimizer, gamma=lr_decay)
     loss_fn = t.nn.CrossEntropyLoss()
 
     # Adjust model weights to be on the sphere of high eigenvectors
-    # n_eigenvectors = top_eigenvectors.shape[0]
-    # rand_vec = t.randn(n_eigenvectors)
-    # unit_sphere_vec = rand_vec @ top_eigenvectors 
-    # unit_sphere_vec /= t.norm(unit_sphere_vec)
-    # point_on_sphere = offset.to(device) + radius*unit_sphere_vec.to(device)
+    n_eigenvectors = top_eigenvectors.shape[0]
+    rand_vec = t.randn(n_eigenvectors)
+    unit_sphere_vec = rand_vec @ top_eigenvectors 
+    unit_sphere_vec /= t.norm(unit_sphere_vec)
+    point_on_sphere = offset.to(device) + radius*unit_sphere_vec.to(device)
 
-    v = t.load('proj_v_pattern.pt')
-    v = (v/t.norm(v, p=2)).float()
-    point_on_sphere = offset.to(device) + radius*v.to(device)
+    # v = t.load('proj_v_pattern.pt')
+    # v = (v/t.norm(v, p=2)).float()
+    # point_on_sphere = offset.to(device) + radius*v.to(device)
 
     # load the point on the sphere into the model
     vector_to_parameters(point_on_sphere, model.parameters())
@@ -90,19 +108,25 @@ def main():
     loss_fn = t.nn.CrossEntropyLoss()
     # Get opacity 0.5 data
     data_loader_train, data_loader_test = load_mnist_data(patterns_per_num=10, opacity=0.5)
-    _, _, eigenvectors = get_hessian_eigenvalues(model, loss_fn, data_loader_test, device="cuda", n_top_vectors=100)
+    _, _, eigenvectors = get_hessian_eigenvalues(model, loss_fn, data_loader_test, device="cuda", n_top_vectors=100, param_extract_fn=get_module_parameters)
     # Train in sphere
     train_in_sphere(model, data_loader_train, eigenvectors, radius=2, lambda_sphere=10, lambda_orth=1, lr=0.01, n_epochs=10, device="cuda", patterns_per_num=10)
 
+def main2():
+    # Load CNN from good_models/model_final_finetuned.ckpt
+    model = CNN(input_size=28)
+    model.load_state_dict(t.load("models/model_final_finetuned_avgpool.ckpt"))
+    model.to(device="cuda")
+    model.eval()
+    loss_fn = t.nn.CrossEntropyLoss()
+    # Get pure number data
+    data_loader_test_number, data_loader_test_pattern = load_pure_number_pattern_data(patterns_per_num=10, is_train=False)
+    _, _, eigenvectors = get_hessian_eigenvalues(model, loss_fn, data_loader_test_number, device="cuda", n_top_vectors=5, param_extract_fn=get_module_parameters)
+    # Get opacity 0.5 data
+    data_loader_train, _ = load_mnist_data(patterns_per_num=10, opacity=0.5)
+    # Train in sphere
+    train_in_sphere(model, data_loader_train, eigenvectors, radius=.5, lambda_sphere=10, lambda_orth=2, lr=0.01, n_epochs=10, device="cuda", patterns_per_num=10)
 
-def loss_diff(model, input_data, target_data, difference_vector, loss_fn):
-    original_loss = loss_fn(model(input_data), target_data)
-    params_vector = parameters_to_vector(model.parameters()).detach()
-    perturbed_params_vector = params_vector + difference_vector
-    #[p + d for p, d in zip(params_vector(), difference_vector)]
-    perturbed_params = vector_to_parameters(perturbed_params_vector)
-    perturbed_loss = loss_fn(model(input_data, params=perturbed_params), target_data)
-    return original_loss - perturbed_loss
 
 if __name__ == '__main__':
-    main()
+    main2()
