@@ -6,7 +6,7 @@ from tqdm import tqdm
 from helpers import reshape_submodule_param_vector
 
 def get_module_parameters(model):
-    return model.conv2.parameters()
+    return model.fc.parameters()
 
 def loss_diff(model, input_data, target_data, difference_vector, loss_fn):
     original_loss = loss_fn(model(input_data), target_data)
@@ -115,7 +115,7 @@ def main():
 def main2():
     # Load CNN from good_models/model_final_finetuned.ckpt
     model = CNN(input_size=28)
-    model.load_state_dict(t.load("models/model_final_finetuned_avgpool.ckpt"))
+    model.load_state_dict(t.load("models/model_final_finetuned.ckpt"))
     model.to(device="cuda")
     model.eval()
     loss_fn = t.nn.CrossEntropyLoss()

@@ -120,7 +120,10 @@ class CNN(t.nn.Module):
         self.output_size = (self.output_size - kernel_size + 2 * padding) // stride + 1
         self.output_size = self.output_size // 2
         self.linear_input_size = output_channels * self.output_size * self.output_size
-        self.fc = t.nn.Linear(self.linear_input_size, n_classes)
+        self.fc1 = t.nn.Linear(self.linear_input_size, n_classes)
+        self.fc2 = t.nn.Linear(n_classes, 2*n_classes)
+        self.fc3 = t.nn.Linear(2*n_classes, n_classes)
+        self.fc = t.nn.Sequential(self.fc1,t.nn.ReLU(),self.fc2,t.nn.ReLU(),self.fc3)
 
     def forward(self, x):
         x = self.conv1(x)
@@ -226,7 +229,7 @@ def finetune_final_step(patterns_per_num, model_dir = "./models/model_1.0.ckpt",
     # Create opacity 0.5 data
     data_loader_train, data_loader_test = load_mnist_data(patterns_per_num, 0.5)
     # Finetune model
-    train_single(data_loader_train, model, t.nn.CrossEntropyLoss(), save_dir,  n_epochs=3, initial_lr=0.005, lr_decay=0.8, patterns_per_num=patterns_per_num)
+    train_single(data_loader_train, model, t.nn.CrossEntropyLoss(), save_dir,  n_epochs=5, initial_lr=0.005, lr_decay=0.8, patterns_per_num=patterns_per_num)
     test(model, data_loader_test)
 
 def test_on_pure_number_patterns(model_path, patterns_per_num):
@@ -291,8 +294,8 @@ def train_direct_opacity_05(patterns_per_num, suffix = "", n_epochs = 20):
 
 
 if __name__ == "__main__":
-    train_just_pure_numbers_patterns(patterns_per_num=10, n_epochs=6, print_pure=True)
-    finetune_final_step(patterns_per_num=10)
+    train_just_pure_numbers_patterns(patterns_per_num=10, n_epochs=15, print_pure=True)
+    finetune_final_step(patterns_per_num=10, model_dir = "./models/model_pure_numbers_patterns.ckpt")
 
     model = CNN(input_size=28)
     model.load_state_dict(t.load('./models/model_final_finetuned.ckpt'))
