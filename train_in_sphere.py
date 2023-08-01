@@ -90,9 +90,9 @@ def main():
     loss_fn = t.nn.CrossEntropyLoss()
     # Get opacity 0.5 data
     data_loader_train, data_loader_test = load_mnist_data(patterns_per_num=10, opacity=0.5)
-    _, _, eigenvectors = get_hessian_eigenvalues(model, loss_fn, data_loader_test, device="cuda", n_top_vectors=10)
+    _, _, eigenvectors = get_hessian_eigenvalues(model, loss_fn, data_loader_test, device="cuda", n_top_vectors=100)
     # Train in sphere
-    train_in_sphere(model, data_loader_train, eigenvectors, radius=5, lambda_sphere=10, lambda_orth=1, lr=0.005, n_epochs=10, device="cuda", patterns_per_num=10)
+    train_in_sphere(model, data_loader_train, eigenvectors, radius=2, lambda_sphere=10, lambda_orth=1, lr=0.01, n_epochs=10, device="cuda", patterns_per_num=10)
 
 
 def loss_diff(model, input_data, target_data, difference_vector, loss_fn):
