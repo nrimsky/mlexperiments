@@ -240,6 +240,19 @@ def test_on_pure_number_patterns(model_path, patterns_per_num):
     print("Testing on pure patterns")
     test(model, data_loader_test_pattern)
 
+def test_pure_and_opacity(model, patterns_per_num, device):
+    # Create data
+    data_loader_test_number, data_loader_test_pattern = load_pure_number_pattern_data(patterns_per_num)
+    # Test
+    print("Testing on pure numbers")
+    test(model, data_loader_test_number, device=device)
+    print("Testing on pure patterns")
+    test(model, data_loader_test_pattern, device=device)
+    # Test on opacity 0.5
+    _, data_loader_test = load_mnist_data(patterns_per_num, 0.5)
+    print("Testing on opacity 0.5")
+    test(model, data_loader_test, device=device)
+
 def test_all():
     for fname in glob("./models/*.ckpt"):
         print(fname)

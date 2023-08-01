@@ -115,7 +115,7 @@ def eigenvector_similarity(fname, patterns_per_num, n_p=10):
     plt.savefig("eigenvector_similarity_pattern_opacity_05.png")
 
 
-def perturb_in_direction(fname, patterns_per_num, direction, n_p=50):
+def perturb_in_direction(fname, patterns_per_num, direction, n_p=50, just_return_proj_v=False):
     """
     fname: checkpoint file name
     patterns_per_num: number of patterns per digit
@@ -149,6 +149,9 @@ def perturb_in_direction(fname, patterns_per_num, direction, n_p=50):
         v = eigenvectors_number[-1] # 3340
     
     proj_v = np.matmul(orth, v) # 3340
+
+    if just_return_proj_v:
+        return proj_v
 
     # get opacity 0.5 dataloader
     _, data_loader_05_test = load_mnist_data(patterns_per_num, opacity=0.5)
