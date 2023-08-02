@@ -1,6 +1,5 @@
 import torch as t
 import torch.nn as nn
-import numpy as np
 import torch.utils.data as data
 
 class ModuloAdditionDataset(data.Dataset):
