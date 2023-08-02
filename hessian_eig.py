@@ -195,6 +195,51 @@ def perturb_in_direction(fname, patterns_per_num, direction, n_p=50, just_return
     plot_pertubation_results(acc_results, 'perturbation_acc_results.png', yaxis='Accuracy (%)')
     plot_pertubation_results(loss_results, 'perturbation_loss_results.png', yaxis='Loss')
 
+def save_approx_hessian(fname, n=150, patterns_per_num=10):
+    """
+    Get top n eigenvectors for pure patterns, pure numbers, and mixed opacity 0.5 data
+    Approximate hessian for each of these datasets using these eigenvectors
+    See to what extent H_op_05 = H_num + H_pattern
+    """
+    # Load model
+    model = CNN(input_size=28)
+    model.load_state_dict(t.load(fname))
+    model.to(device="cuda")
+    model.eval()
+    loss_fn = t.nn.CrossEntropyLoss()
+    # Load pure pattern number data
+    data_loader_test_number, data_loader_test_pattern = load_pure_number_pattern_data(patterns_per_num, is_train=False)
+    # Load mixed opacity 0.5 data
+    _, data_loader_05_test = load_mnist_data(patterns_per_num, opacity=0.5)
+    # Get top n eigenvectors for each dataset
+    _, eigenvalues_number, eigenvectors_number = get_hessian_eigenvalues(model, loss_fn, data_loader_test_number, num_batches=50, device="cuda", n_top_vectors=n)
+    _, eigenvalues_pattern, eigenvectors_pattern = get_hessian_eigenvalues(model, loss_fn, data_loader_test_pattern, num_batches=50, device="cuda", n_top_vectors=n)
+    _, eigenvalues_05, eigenvectors_05 = get_hessian_eigenvalues(model, loss_fn, data_loader_05_test, num_batches=50, device="cuda", n_top_vectors=n)
+    
+    # Function to get hessian given eigenvectors and eigenvalues
+    def get_hessian(eigenvectors, eigenvalues):
+        # Ensure inputs are numpy arrays
+        eigenvectors = np.array(eigenvectors)
+        eigenvalues = np.array(eigenvalues)
+
+        # Check if eigenvectors and eigenvalues have correct sizes
+        assert len(eigenvectors) == len(eigenvalues), "The number of eigenvectors and eigenvalues must match"
+
+        # Create diagonal matrix from eigenvalues
+        diag_matrix = np.diag(eigenvalues)
+
+        # Reconstruct the matrix using spectral theorem (A = QΛQ')
+        approx_matrix = eigenvectors.T @ diag_matrix @ eigenvectors
+
+        return approx_matrix
+    # Get Hessian for each dataset
+    H_number = get_hessian(eigenvectors_number, eigenvalues_number)
+    H_pattern = get_hessian(eigenvectors_pattern, eigenvalues_pattern)
+    H_05 = get_hessian(eigenvectors_05, eigenvalues_05)
+    # Create file to store results
+    with open(f"txt_res/hessian_matrices_results_10patterns.txt", "w") as f:
+        f.write(f"H_number:\n{H_number}\n\nH_pattern:\n{H_pattern}\n\nH_05:\n{H_05}\n")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("version", help="version of model to load")
@@ -211,49 +256,3 @@ if __name__ == "__main__":
         perturb_in_direction(f"./models/model_{version}.ckpt", patterns_per_num, args.preserve)
     else:
         get_hessian_eig_mnist(f"./models/model_{version}.ckpt", patterns_per_num=patterns_per_num, opacity=opacity, use_mixed_dataloader=use_mixed_dataloader)
-
-    # @ opacity 0.5
-    # 0.0: 171, 52, 32, 9
-    # 0.2: 56, 15, 10, 6
-    # 0.4: 32, 9, 9, 3
-    # 0.6: 35, 10, 9, 2
-    # 0.7: 35, 9, 9, 2
-    # 0.8: 39, 10, 9, 2
-    # 0.9: 40, 11, 9, 3
-    # 0.95: 46, 11, 9, 5
-    # 1.0: 47, 11, 9, 4
-
-    # Final finetuned 28, 9, 7, 1
-
-    # 1.0 @ opacity 0 (pure num): 174, 38, 20, 9
-    # 1.0 @ opacity 1 (pure patterns): 14, 4, 0, 0
-    # 1.0 @ 0/1 combination: 109, 20, 10, 7
-
-    # Mixture pure patterns numbers 62, 14, 9, 5
-
-    # Mixture pure patterns numbers 10d pattern @ 1.0 - 145, 52, 29, 9
-    # Mixture pure patterns numbers 10d pattern @ 0.0 - 161, 34, 16, 8
-    # Mixture pure patterns numbers 10d pattern @ 0/1 combination - 192, 45, 23, 8
-    # Mixture pure patterns numbers 10d pattern @ opacity 0.5 - 178, 70, 44, 9
-
-    # Direct 0.5 opacity trained 10d pattern @ 1.0 - 183, 144, 120, 61 // 161, 131, 103, 58
-    # Direct 0.5 opacity trained 10d pattern @ 0.0 - 181, 53, 30, 9
-    # Direct 0.5 opacity trained 10d pattern @ 0/1 combination - 187, 140, 109, 49
-    # Direct 0.5 opacity trained 10d pattern @ opacity 0.5 - 189, 68, 39, 9
-
-    # Direct 0.5 opacity trained 51, 12, 10, 6
-
-
-
-
-# python hessian_eig.py direct_0.5_ppn_10 --opacity=0.0 --patterns_per_num=10
-# Number of eigenvalues greater than 0.1: 153
-# Number of eigenvalues greater than 1: 78
-# Number of eigenvalues greater than 2: 49
-# Number of eigenvalues greater than 10: 16
-
-# python hessian_eig.py direct_0.5_ppn_10 --opacity=0.5 --patterns_per_num=10
-# Number of eigenvalues greater than 0.1: 185
-# Number of eigenvalues greater than 1: 74
-# Number of eigenvalues greater than 2: 44
-# Number of eigenvalues greater than 10: 10
