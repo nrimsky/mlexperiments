@@ -36,7 +36,7 @@ class MLP(nn.Module):
         x2 = self.embedding[x2]
         x = x1 + x2
         x = self.linear1(x)
-        x = self.silu(x)
+        x = x ** 2
         return self.linear2(x)
     
 
