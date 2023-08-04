@@ -18,25 +18,29 @@ class ModuloAdditionDataset(data.Dataset):
         return a, b, res
 
 
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 class MLP(nn.Module):
-    def __init__(self, hidden_dim, vocab_size):
+    def __init__(self, embed_dim, vocab_size, hidden_dim):
         super().__init__()
-        self.embedding = nn.Parameter(t.randn(vocab_size, hidden_dim))
-        self.linear1 = nn.Linear(hidden_dim*2, hidden_dim)
+        self.embedding = nn.Parameter(t.randn(vocab_size, embed_dim))
+        self.linear1 = nn.Linear(embed_dim, hidden_dim)
         self.linear2 = nn.Linear(hidden_dim, vocab_size)
-        self.relu = nn.ReLU()
+        self.silu = nn.SiLU()
 
     def forward(self, x1, x2):
         x1 = self.embedding[x1] 
         x2 = self.embedding[x2]
-        x = t.cat((x1, x2), dim=-1)
-        x = self.relu(self.linear1(x))
+        x = x1 + x2
+        x = self.linear1(x)
+        x = self.silu(x)
         return self.linear2(x)
     
 
-def train(vocab_size = 114, train_frac = 0.3, hidden_dim = 128):
-    model = MLP(hidden_dim=hidden_dim, vocab_size=vocab_size)
+def train(vocab_size = 114, train_frac = 0.3, hidden_dim = 32, embed_dim = 16):
+    model = MLP(vocab_size=vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim)
+    print(f"Number of parameters: {count_parameters(model)}")
     dataset = ModuloAdditionDataset(vocab_size)
 
     total_length = len(dataset)
@@ -47,7 +51,7 @@ def train(vocab_size = 114, train_frac = 0.3, hidden_dim = 128):
     batch_size = 256
     train_loader = data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_loader = data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-    optimizer = t.optim.AdamW(model.parameters(), lr=1e-2, weight_decay=.5)
+    optimizer = t.optim.AdamW(model.parameters(), lr=2e-2, weight_decay=.5)
     criterion = nn.CrossEntropyLoss()
     epochs = 5000
     device = t.device("cuda" if t.cuda.is_available() else "cpu")
@@ -79,4 +83,4 @@ def train(vocab_size = 114, train_frac = 0.3, hidden_dim = 128):
 
 
 if __name__ == "__main__":
-    train(vocab_size = 114, train_frac = 0.3, hidden_dim = 32)
+    train(vocab_size = 114, train_frac = 0.3, embed_dim = 12, hidden_dim = 32) #best so far embed_dim = 12, hidden_dim = 32
