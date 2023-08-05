@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.utils.data as data
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
+import math
 
 class ModuloAdditionDataset(data.Dataset):
     def __init__(self, d_vocab=114):
@@ -23,21 +24,80 @@ class ModuloAdditionDataset(data.Dataset):
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
+# class MLP(nn.Module):
+#     def __init__(self, embed_dim, vocab_size, hidden_dim):
+#         super().__init__()
+#         self.embedding = nn.Parameter(t.randn(vocab_size, embed_dim))
+#         self.n_blocks = embed_dim // 2
+#         self.linear1 = t.nn.ParameterList([nn.Parameter(t.randn(2, hidden_dim)) for _ in range(self.n_blocks)])
+#         self.linear2 = t.nn.ParameterList([nn.Parameter(t.randn(hidden_dim, 2)) for _ in range(self.n_blocks)])
+#         self.silu = nn.SiLU()
+#         self.linear3 = nn.Linear(embed_dim, vocab_size)
+#         self.hidden_dim = hidden_dim
+#         self.silu = nn.SiLU()
+
+#     def forward(self, x1, x2):
+#         x1 = self.embedding[x1]
+#         x2 = self.embedding[x2]
+#         list_x12 = []
+#         for i in range(self.n_blocks):
+#             x = t.matmul(x1[:,i*2:i*2+2], self.linear1[i]) + t.matmul(x2[:,i*2:i*2+2],self.linear1[i])
+#             x = x ** 2
+#             x =  t.matmul(x, self.linear2[i])
+#             list_x12.append(x)
+#         x = t.stack(list_x12, dim = -1)
+#         x = t.flatten(x, start_dim = -2)
+#         return self.linear3(x)
+    
 class MLP(nn.Module):
     def __init__(self, embed_dim, vocab_size, hidden_dim):
         super().__init__()
+        self.n_blocks = embed_dim // 2
         self.embedding = nn.Parameter(t.randn(vocab_size, embed_dim))
-        self.linear1 = nn.Linear(embed_dim, hidden_dim)
-        self.linear2 = nn.Linear(hidden_dim, vocab_size)
+        self.linear1_weights = nn.Parameter(t.randn(self.n_blocks, 2, hidden_dim))
+        self.linear2_weights = nn.Parameter(t.randn(self.n_blocks, hidden_dim, 2))
+        self.linear3 = nn.Linear(embed_dim, vocab_size, bias=False)
         self.silu = nn.SiLU()
 
     def forward(self, x1, x2):
-        x1 = self.embedding[x1] 
-        x2 = self.embedding[x2]
+        x1 = self.embedding[x1].view(-1, self.n_blocks, 2)
+        x2 = self.embedding[x2].view(-1, self.n_blocks, 2)
+        # Apply different linear transformations to each block
+        x1 = t.einsum('bnj,njk->bnk', x1, self.linear1_weights)
+        x2 = t.einsum('bnj,njk->bnk', x2, self.linear1_weights)
+    
         x = x1 + x2
-        x = self.linear1(x)
-        x = x ** 2
-        return self.linear2(x)
+        x = self.silu(x)
+        x = t.einsum('bnk,nkj->bnj', x, self.linear2_weights)
+        # Flatten the tensor from shape (batch_size, n_blocks, 2) to (batch_size, n_blocks*2) = (batch_size, embed_dim)
+        x = x.reshape(x.size(0), -1)
+        return self.linear3(x)
+
+
+def plot_embeddings_chunks(model):
+    plt.clf()
+    embeddings = model.embedding.detach().cpu() # vocab_size x embed_dim
+    chunked = t.chunk(embeddings, embeddings.shape[-1]//2, dim = -1)
+    n = embeddings.shape[-1]//2
+
+    # calculate number of rows and columns for subplots
+    rows = int(n ** 0.5)
+    cols = n // rows
+    if rows * cols < n:  # if not enough subplots, add an extra column
+        cols += 1
+
+    # visualise each vocab_size x 2 chunk in a subplot
+    fig, axs = plt.subplots(rows, cols, figsize=(15, 15))
+    axs = axs.flatten()  # flatten the array of axes to simplify indexing
+    for i, chunk in enumerate(chunked):
+        axs[i].scatter(chunk[:, 0], chunk[:, 1])
+        words = [str(i) for i in range(embeddings.shape[0])]
+        for j, word in enumerate(words):
+            axs[i].annotate(word, xy=(chunk[j, 0], chunk[j, 1]))
+    plt.tight_layout()  # adjust spacing between subplots
+    plt.savefig("embeddings_chunks.png")
+
+
     
 
 def plot_embeddings(model, vocab_size):
@@ -66,11 +126,12 @@ def train(vocab_size = 114, train_frac = 0.3, hidden_dim = 32, embed_dim = 16):
     batch_size = 256
     train_loader = data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_loader = data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-    optimizer = t.optim.AdamW(model.parameters(), lr=2e-2, weight_decay=.5)
+    optimizer = t.optim.AdamW(model.parameters(), lr=1e-2, weight_decay=.1)
     criterion = nn.CrossEntropyLoss()
-    epochs = 5000
+    epochs = 3000
     device = t.device("cuda" if t.cuda.is_available() else "cpu")
     model.to(device)
+    old_acc = 0
     for epoch in range(epochs):
         model.train()
         train_loss = 0
@@ -86,7 +147,7 @@ def train(vocab_size = 114, train_frac = 0.3, hidden_dim = 32, embed_dim = 16):
         model.eval()
         val_loss = 0
         val_acc = 0
-        if epoch % 50 == 0:
+        if epoch % 10 == 0:
             with t.no_grad():
                 for x1, x2, target in test_loader:
                     x1, x2, target = x1.to(device), x2.to(device), target.to(device)
@@ -94,13 +155,22 @@ def train(vocab_size = 114, train_frac = 0.3, hidden_dim = 32, embed_dim = 16):
                     loss = criterion(output, target)
                     val_loss += loss.item()
                     val_acc += (output.argmax(dim=-1) == target).float().mean()
-            print(f"Epoch {epoch}: train loss {train_loss / len(train_loader)}; test loss {val_loss / len(test_loader)}; test acc {val_acc / len(test_loader)}")
+            val_acc = val_acc / len(test_loader)
+            val_loss = val_loss / len(test_loader)
+            if epoch % 300 == 0:
+                print(f"Epoch {epoch}: train loss {train_loss}; test loss {val_loss}; test acc {val_acc}")
+
+            if math.log(1-val_acc) < math.log(1-old_acc)-0.1:
+                print(f"Epoch {epoch}: train loss {train_loss}; test loss {val_loss}; test acc {val_acc}; old acc {old_acc}")
+                old_acc = val_acc
+
     t.save(model.state_dict(), "modular_addition.ckpt")
 
 
 if __name__ == "__main__":
-    train(vocab_size = 114, train_frac = 0.3, embed_dim = 12, hidden_dim = 32) #best so far embed_dim = 12, hidden_dim = 32
-    model = MLP(vocab_size=114, embed_dim=12, hidden_dim=32)
+    train(vocab_size = 114, train_frac = 0.4, embed_dim = 14, hidden_dim = 8) #best so far embed_dim = 12, hidden_dim = 32
+    model = MLP(vocab_size=114, embed_dim=14, hidden_dim=8)
     model.load_state_dict(t.load("modular_addition.ckpt"))
     model.eval()
     plot_embeddings(model, 114)
+    plot_embeddings_chunks(model)
