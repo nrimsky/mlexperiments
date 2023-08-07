@@ -1,3 +1,8 @@
+##############################################
+#use (e.g.) >>ffmpeg -framerate 3 -i embeddings_movie_%04d.png -c:v libx264 -pix_fmt yuv420p movie.mp4
+#to combine into movie. Remember to delete png files afterwards to avoid accidentally getting multiple experiments in one movie
+
+
 import torch as t
 import torch.nn as nn
 import torch.utils.data as data
@@ -61,8 +66,8 @@ class MLP(nn.Module):
         self.linear1_weights = nn.Parameter(t.randn(self.n_blocks, 2, hidden_dim))
         self.linear2_weights = nn.Parameter(t.randn(self.n_blocks, hidden_dim, 2))
         self.linear3 = nn.Linear(embed_dim, vocab_size, bias=False)
-        #self.silu = nn.SiLU()
-        self.relu = nn.ReLU()
+        self.silu = nn.SiLU()
+        #self.relu = nn.ReLU()
 
     def forward(self, x1, x2):
         x1 = self.embedding[x1].view(-1, self.n_blocks, 2)
@@ -72,7 +77,7 @@ class MLP(nn.Module):
         x2 = t.einsum('bnj,njk->bnk', x2, self.linear1_weights)
     
         x = x1 + x2
-        x = self.relu(x)
+        x = self.silu(x)
         # x = x**2
         # x = self.silu(x)
         x = t.einsum('bnk,nkj->bnj', x, self.linear2_weights)
