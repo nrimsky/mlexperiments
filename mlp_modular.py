@@ -4,6 +4,7 @@ import torch.utils.data as data
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 import math
+from mlp_modular_movie import plot_embeddings_movie, run_movie_cmd
 
 class ModuloAdditionDataset(data.Dataset):
     def __init__(self, d_vocab=114):
@@ -20,34 +21,8 @@ class ModuloAdditionDataset(data.Dataset):
         res = (a + b) % (self.d_vocab - 1)
         return a, b, res
 
-
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-# class MLP(nn.Module):
-#     def __init__(self, embed_dim, vocab_size, hidden_dim):
-#         super().__init__()
-#         self.embedding = nn.Parameter(t.randn(vocab_size, embed_dim))
-#         self.n_blocks = embed_dim // 2
-#         self.linear1 = t.nn.ParameterList([nn.Parameter(t.randn(2, hidden_dim)) for _ in range(self.n_blocks)])
-#         self.linear2 = t.nn.ParameterList([nn.Parameter(t.randn(hidden_dim, 2)) for _ in range(self.n_blocks)])
-#         self.silu = nn.SiLU()
-#         self.linear3 = nn.Linear(embed_dim, vocab_size)
-#         self.hidden_dim = hidden_dim
-#         self.silu = nn.SiLU()
-
-#     def forward(self, x1, x2):
-#         x1 = self.embedding[x1]
-#         x2 = self.embedding[x2]
-#         list_x12 = []
-#         for i in range(self.n_blocks):
-#             x = t.matmul(x1[:,i*2:i*2+2], self.linear1[i]) + t.matmul(x2[:,i*2:i*2+2],self.linear1[i])
-#             x = x ** 2
-#             x =  t.matmul(x, self.linear2[i])
-#             list_x12.append(x)
-#         x = t.stack(list_x12, dim = -1)
-#         x = t.flatten(x, start_dim = -2)
-#         return self.linear3(x)
     
 class MLP(nn.Module):
     def __init__(self, embed_dim, vocab_size, hidden_dim):
@@ -98,8 +73,6 @@ def plot_embeddings_chunks(model):
     plt.savefig("embeddings_chunks.png")
 
 
-    
-
 def plot_embeddings(model, vocab_size):
     plt.clf()
     embeddings = model.embedding.detach().cpu().numpy()
@@ -112,26 +85,29 @@ def plot_embeddings(model, vocab_size):
         plt.annotate(word, xy=(embeddings_2d[i, 0], embeddings_2d[i, 1]))
     plt.savefig("embeddings.png")
 
-
-def train(vocab_size = 114, train_frac = 0.3, hidden_dim = 32, embed_dim = 16):
-    model = MLP(vocab_size=vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim)
-    print(f"Number of parameters: {count_parameters(model)}")
+def get_train_test_loaders(train_frac, batch_size, vocab_size):
     dataset = ModuloAdditionDataset(vocab_size)
-
     total_length = len(dataset)
     train_length = int(total_length * train_frac)
     test_length = total_length - train_length
     train_dataset, test_dataset = data.random_split(dataset, [train_length, test_length])
-
-    batch_size = 256
     train_loader = data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_loader = data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-    optimizer = t.optim.AdamW(model.parameters(), lr=1e-2, weight_decay=.1)
+    return train_loader, test_loader
+
+
+def train(vocab_size = 114, train_frac = 0.3, hidden_dim = 32, embed_dim = 16, save_frames = True):
+    model = MLP(vocab_size=vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim)
+    print(f"Number of parameters: {count_parameters(model)}")
+    batch_size = 256
+    train_loader, test_loader = get_train_test_loaders(train_frac, batch_size, vocab_size)
+    optimizer = t.optim.AdamW(model.parameters(), lr=1e-2, weight_decay=.05)
     criterion = nn.CrossEntropyLoss()
-    epochs = 3000
+    epochs = 10000
     device = t.device("cuda" if t.cuda.is_available() else "cpu")
     model.to(device)
     old_acc = 0
+    step = 0
     for epoch in range(epochs):
         model.train()
         train_loss = 0
@@ -143,34 +119,42 @@ def train(vocab_size = 114, train_frac = 0.3, hidden_dim = 32, embed_dim = 16):
             train_loss += loss.item()
             loss.backward()
             optimizer.step()
-
         model.eval()
-        val_loss = 0
-        val_acc = 0
+        if save_frames:
+            if epoch % 50 == 0 or epoch<50 or (epoch<200 and epoch % 5 == 0): 
+                with t.no_grad():
+                    step += 1
+                    plot_embeddings_movie(model, step)
         if epoch % 10 == 0:
-            with t.no_grad():
-                for x1, x2, target in test_loader:
-                    x1, x2, target = x1.to(device), x2.to(device), target.to(device)
-                    output = model(x1, x2)
-                    loss = criterion(output, target)
-                    val_loss += loss.item()
-                    val_acc += (output.argmax(dim=-1) == target).float().mean()
-            val_acc = val_acc / len(test_loader)
-            val_loss = val_loss / len(test_loader)
+            val_loss, val_acc = test_model(model, test_loader, device, criterion)
             if epoch % 300 == 0:
                 print(f"Epoch {epoch}: train loss {train_loss}; test loss {val_loss}; test acc {val_acc}")
-
             if math.log(1-val_acc) < math.log(1-old_acc)-0.1:
                 print(f"Epoch {epoch}: train loss {train_loss}; test loss {val_loss}; test acc {val_acc}; old acc {old_acc}")
                 old_acc = val_acc
-
     t.save(model.state_dict(), "modular_addition.ckpt")
 
 
+def test_model(model, test_loader, device, criterion):
+    val_loss = 0
+    val_acc = 0
+    with t.no_grad():
+        for x1, x2, target in test_loader:
+            x1, x2, target = x1.to(device), x2.to(device), target.to(device)
+            output = model(x1, x2)
+            loss = criterion(output, target)
+            val_loss += loss.item()
+            val_acc += (output.argmax(dim=-1) == target).float().mean()
+        val_acc = val_acc / len(test_loader)
+        val_loss = val_loss / len(test_loader)
+    return val_loss, val_acc
+
+
 if __name__ == "__main__":
-    train(vocab_size = 114, train_frac = 0.4, embed_dim = 14, hidden_dim = 8) #best so far embed_dim = 12, hidden_dim = 32
+    train(vocab_size = 114, train_frac = 0.4, embed_dim = 14, hidden_dim = 8)
     model = MLP(vocab_size=114, embed_dim=14, hidden_dim=8)
     model.load_state_dict(t.load("modular_addition.ckpt"))
     model.eval()
     plot_embeddings(model, 114)
     plot_embeddings_chunks(model)
+    run_movie_cmd()
