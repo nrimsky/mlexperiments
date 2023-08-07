@@ -1,5 +1,6 @@
-#fixing simulated annealing code from https://raw.githubusercontent.com/jramapuram/SimulatedAnnealing/master/optim/sa.py
-
+'''#########################
+fixing simulated annealing code from https://raw.githubusercontent.com/jramapuram/SimulatedAnnealing/master/optim/sa.py
+######################'''
 import torch
 import numpy as np
 import torch.nn.functional as F
@@ -80,6 +81,7 @@ class SimulatedAnnealing(Optimizer):
         """
         if closure is None:
             raise Exception("loss closure is required to do SA")
+#######			!HERE: remove groups from annealing statements
 
         loss = closure()
 #		generating params instead of groups
@@ -97,7 +99,6 @@ class SimulatedAnnealing(Optimizer):
 # #            cloned_params = [p.clone() for p in group['params']]
 
 
-#######			!HERE: remove groups from annealing statements
             for p in group['params']:
                 # anneal tau if it matches the requirements
                 if group['iteration'] > 0 \
@@ -138,9 +139,9 @@ class SimulatedAnnealing(Optimizer):
         else:
             # evaluate the metropolis criterion
             ap = acceptance_prob(loss, loss_perturbed, tau)
-            print("old = ", loss.data[0], "| pert = ", loss_perturbed.data[0],
-                  " | ap = ", ap.data[0], " | tau = ", tau)
-            if ap.data[0] > np.random.rand():
+            print("old = ", loss.item(), "| pert = ", loss_perturbed.item(),
+                  " | ap = ", ap.item(), " | tau = ", tau)
+            if ap.item() > np.random.rand():
                 return loss_perturbed, True
 
             # return the original loss if above fails
