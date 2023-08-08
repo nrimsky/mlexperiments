@@ -3,8 +3,8 @@ import torch.nn as nn
 import torch.utils.data as data
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
-import math
 from mlp_modular_movie import plot_embeddings_movie, run_movie_cmd
+from random import randint
 
 class ModuloAdditionDataset(data.Dataset):
     def __init__(self, d_vocab=114):
@@ -23,12 +23,30 @@ class ModuloAdditionDataset(data.Dataset):
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
+def make_circle_embeddings(embed_dim, vocab_size):
+    n_blocks = embed_dim // 2
+    k_values = [randint(1, vocab_size -1) for _ in range(n_blocks)]
+    print("Using K values", k_values)
+    arange_tensor = t.arange(vocab_size - 1).float()
+    div_tensor = 2 * t.pi * arange_tensor / (vocab_size - 1)
+
+    # Create M_k without transposing
+    M_k_list = [
+        t.stack([
+            t.cat((t.cos(k * div_tensor), t.tensor([0]))),
+            t.cat((t.sin(k * div_tensor), t.tensor([0])))
+        ], dim=1)
+        for k in k_values
+    ]
+    return t.cat(M_k_list, dim=1)
     
 class MLP(nn.Module):
     def __init__(self, embed_dim, vocab_size, hidden_dim):
         super().__init__()
         self.n_blocks = embed_dim // 2
-        self.embedding = nn.Parameter(t.randn(vocab_size, embed_dim))
+        self.embedding = nn.Parameter(make_circle_embeddings(embed_dim, vocab_size))
         self.linear1_weights = nn.Parameter(t.randn(self.n_blocks, 2, hidden_dim))
         self.linear2_weights = nn.Parameter(t.randn(self.n_blocks, hidden_dim, 2))
         self.linear3 = nn.Linear(embed_dim, vocab_size, bias=False)
@@ -95,15 +113,17 @@ def get_train_test_loaders(train_frac, batch_size, vocab_size):
     test_loader = data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     return train_loader, test_loader
 
+def get_weight_norm(model):
+    return sum(p.norm() for p in model.parameters() if p.requires_grad)
 
 def train(vocab_size = 114, train_frac = 0.3, hidden_dim = 32, embed_dim = 16, save_frames = True):
     model = MLP(vocab_size=vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim)
     print(f"Number of parameters: {count_parameters(model)}")
     batch_size = 256
     train_loader, test_loader = get_train_test_loaders(train_frac, batch_size, vocab_size)
-    optimizer = t.optim.AdamW(model.parameters(), lr=1e-2, weight_decay=.05)
+    optimizer = t.optim.SGD(model.parameters(), lr=0.02)
     criterion = nn.CrossEntropyLoss()
-    epochs = 10000
+    epochs = 20000
     device = t.device("cuda" if t.cuda.is_available() else "cpu")
     model.to(device)
     old_acc = 0
@@ -111,27 +131,27 @@ def train(vocab_size = 114, train_frac = 0.3, hidden_dim = 32, embed_dim = 16, s
     for epoch in range(epochs):
         model.train()
         train_loss = 0
+        reg_loss = 0
         for x1, x2, target in train_loader:
             x1, x2, target = x1.to(device), x2.to(device), target.to(device)
             optimizer.zero_grad()
             output = model(x1, x2)
-            loss = criterion(output, target)
+            reg = get_weight_norm(model) * 0.02
+            loss = criterion(output, target) + reg
             train_loss += loss.item()
+            reg_loss += reg.item()
             loss.backward()
             optimizer.step()
         model.eval()
         if save_frames:
-            if epoch % 50 == 0 or epoch<50 or (epoch<200 and epoch % 5 == 0): 
+            if epoch % 500 == 0: 
                 with t.no_grad():
                     step += 1
                     plot_embeddings_movie(model, step)
-        if epoch % 10 == 0:
+        if epoch % 200 == 0:
             val_loss, val_acc = test_model(model, test_loader, device, criterion)
-            if epoch % 300 == 0:
-                print(f"Epoch {epoch}: train loss {train_loss}; test loss {val_loss}; test acc {val_acc}")
-            if math.log(1-val_acc) < math.log(1-old_acc)-0.1:
-                print(f"Epoch {epoch}: train loss {train_loss}; test loss {val_loss}; test acc {val_acc}; old acc {old_acc}")
-                old_acc = val_acc
+            print(f"Epoch {epoch}: train loss {train_loss}; reg loss {reg_loss}; test loss {val_loss}; test acc {val_acc}; old acc {old_acc}")
+            old_acc = val_acc
     t.save(model.state_dict(), "modular_addition.ckpt")
 
 
@@ -151,10 +171,10 @@ def test_model(model, test_loader, device, criterion):
 
 
 if __name__ == "__main__":
-    train(vocab_size = 114, train_frac = 0.4, embed_dim = 14, hidden_dim = 8)
-    model = MLP(vocab_size=114, embed_dim=14, hidden_dim=8)
-    model.load_state_dict(t.load("modular_addition.ckpt"))
-    model.eval()
-    plot_embeddings(model, 114)
-    plot_embeddings_chunks(model)
+    # train(vocab_size = 38, train_frac = 0.6, embed_dim = 12, hidden_dim = 8, save_frames = True)
+    # model = MLP(vocab_size=38, embed_dim=12, hidden_dim=8)
+    # model.load_state_dict(t.load("modular_addition.ckpt"))
+    # model.eval()
+    # plot_embeddings(model, 38)
+    # plot_embeddings_chunks(model)
     run_movie_cmd()
