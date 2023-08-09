@@ -5,6 +5,11 @@ from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 from mlp_modular_movie import plot_embeddings_movie, run_movie_cmd
 from random import randint
+from itertools import combinations
+
+def all_subsets(s):
+    return [set(comb) for i in range(len(s) + 1) for comb in combinations(s, i)]
+
 
 class ModuloAdditionDataset(data.Dataset):
     def __init__(self, d_vocab=114):
@@ -46,7 +51,8 @@ class MLP(nn.Module):
     def __init__(self, embed_dim, vocab_size, hidden_dim):
         super().__init__()
         self.n_blocks = embed_dim // 2
-        self.embedding = nn.Parameter(make_circle_embeddings(embed_dim, vocab_size))
+        # self.embedding = nn.Parameter(make_circle_embeddings(embed_dim, vocab_size))  # size vocab size x embed_dim
+        self.embedding = nn.Parameter(t.randn(vocab_size, embed_dim))
         self.linear1_weights = nn.Parameter(t.randn(self.n_blocks, 2, hidden_dim))
         self.linear2_weights = nn.Parameter(t.randn(self.n_blocks, hidden_dim, 2))
         self.linear3 = nn.Linear(embed_dim, vocab_size, bias=False)
@@ -65,7 +71,38 @@ class MLP(nn.Module):
         # Flatten the tensor from shape (batch_size, n_blocks, 2) to (batch_size, n_blocks*2) = (batch_size, embed_dim)
         x = x.reshape(x.size(0), -1)
         return self.linear3(x)
+    
+def add_embedding_noise(model, circuit_nums, device="cpu"):
+    embedding_weights = model.embedding.detach().clone().cpu()
+    norm_param = embedding_weights[:, :2].norm(p=2).cpu()*5
+    vec = t.zeros(embedding_weights.shape[1])
+    for i in range(embedding_weights.shape[1]//2):
+        if i in circuit_nums:
+            vec[2*i] = 1
+            vec[2*i + 1] = 1
+    vec = t.randn_like(embedding_weights) * vec.unsqueeze(0)
+    vec = vec / t.norm(vec, p=2)
+    vec *= norm_param
+    embedding_weights += vec
+    # set model embedding to new embedding
+    model.embedding = nn.Parameter(embedding_weights.to(device))
+    return model
 
+def add_embedding_noise_2(model, circuit_nums, frac=0.5, device="cpu"):
+    embedding_weights = model.embedding.detach().clone().cpu()
+    mask = t.zeros(embedding_weights.shape[1])
+    p = frac / len(circuit_nums)
+    for i in range(embedding_weights.shape[1]//2):
+        if i in circuit_nums:
+            mask[2*i] = 1
+            mask[2*i + 1] = 1
+    mask = t.ones_like(embedding_weights) * mask.unsqueeze(0)
+    inv_mask = t.ones_like(embedding_weights) * (1 - mask.unsqueeze(0))
+    rand_mask = t.rand_like(embedding_weights) > p
+    full_mask = mask * rand_mask + inv_mask
+    embedding_weights = (embedding_weights * full_mask).float()[0]
+    model.embedding = nn.Parameter(embedding_weights.to(device))
+    return model
 
 def plot_embeddings_chunks(model):
     plt.clf()
@@ -114,16 +151,14 @@ def get_train_test_loaders(train_frac, batch_size, vocab_size):
     return train_loader, test_loader
 
 def get_weight_norm(model):
-    return sum(p.norm() for p in model.parameters() if p.requires_grad)
+    return sum((p ** 2).sum() for p in model.parameters() if p.requires_grad)
 
-def train(vocab_size = 114, train_frac = 0.3, hidden_dim = 32, embed_dim = 16, save_frames = True):
+def train(train_loader, test_loader, vocab_size = 114, hidden_dim = 32, embed_dim = 16, save_frames = True):
     model = MLP(vocab_size=vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim)
     print(f"Number of parameters: {count_parameters(model)}")
-    batch_size = 256
-    train_loader, test_loader = get_train_test_loaders(train_frac, batch_size, vocab_size)
-    optimizer = t.optim.SGD(model.parameters(), lr=0.01)
+    optimizer = t.optim.AdamW(model.parameters(), lr=0.005, weight_decay=0.01)
     criterion = nn.CrossEntropyLoss()
-    epochs = 20000
+    epochs = 15000
     device = t.device("cuda" if t.cuda.is_available() else "cpu")
     model.to(device)
     old_acc = 0
@@ -131,28 +166,26 @@ def train(vocab_size = 114, train_frac = 0.3, hidden_dim = 32, embed_dim = 16, s
     for epoch in range(epochs):
         model.train()
         train_loss = 0
-        reg_loss = 0
         for x1, x2, target in train_loader:
             x1, x2, target = x1.to(device), x2.to(device), target.to(device)
             optimizer.zero_grad()
             output = model(x1, x2)
-            reg = get_weight_norm(model) * 0.01
-            loss = criterion(output, target) + reg
+            loss = criterion(output, target)
             train_loss += loss.item()
-            reg_loss += reg.item()
             loss.backward()
             optimizer.step()
         model.eval()
         if save_frames:
-            if epoch % 500 == 0: 
+            if epoch % 1000 == 0: 
                 with t.no_grad():
                     step += 1
                     plot_embeddings_movie(model, step)
         if epoch % 200 == 0:
             val_loss, val_acc = test_model(model, test_loader, device, criterion)
-            print(f"Epoch {epoch}: train loss {train_loss}; reg loss {reg_loss}; test loss {val_loss}; test acc {val_acc}; old acc {old_acc}")
+            print(f"Epoch {epoch}: train loss {train_loss}; test loss {val_loss}; test acc {val_acc}; old acc {old_acc}")
             old_acc = val_acc
     t.save(model.state_dict(), "modular_addition.ckpt")
+    return model
 
 
 def test_model(model, test_loader, device, criterion):
@@ -169,12 +202,33 @@ def test_model(model, test_loader, device, criterion):
         val_loss = val_loss / len(test_loader)
     return val_loss, val_acc
 
+def experiment(model, test_loader):
+    device = t.device("cuda" if t.cuda.is_available() else "cpu")
+    model = model.to(device)
+    orig_embedding  = model.embedding.detach().clone()
+    model.eval()
+    val_loss, val_acc = test_model(model, test_loader, device, nn.CrossEntropyLoss())
+    print(f"Original: loss: {float(val_loss)}, accuracy: {float(val_acc)}")
+    for subset in all_subsets([0, 1, 2]):
+        if len(subset) == 0:
+            continue
+        model = add_embedding_noise_2(model, subset, frac=0.5, device=device)
+        val_loss, val_acc = test_model(model, test_loader, device, nn.CrossEntropyLoss())
+        print(f"Embedding noise only on circuits ({subset}): loss: {float(val_loss)}, accuracy: {float(val_acc)}")
+        model.embedding = t.nn.Parameter(orig_embedding.to(device))
 
 if __name__ == "__main__":
-    train(vocab_size = 38, train_frac = 0.7, embed_dim = 12, hidden_dim = 8, save_frames = False)
-    model = MLP(vocab_size=38, embed_dim=12, hidden_dim=8)
+    train_frac = 0.7
+    batch_size = 256
+    vocab_size = 38
+    embed_dim = 6
+    hidden_dim = 8
+    train_loader, test_loader = get_train_test_loaders(train_frac, batch_size, vocab_size)
+    train(train_loader, test_loader, vocab_size = vocab_size, embed_dim = embed_dim, hidden_dim = hidden_dim, save_frames = False)
+    # run_movie_cmd()
+    model = MLP(vocab_size=vocab_size, embed_dim=embed_dim, hidden_dim = hidden_dim)
     model.load_state_dict(t.load("modular_addition.ckpt"))
     model.eval()
-    plot_embeddings(model, 38)
+    plot_embeddings(model, vocab_size)
     plot_embeddings_chunks(model)
-    # run_movie_cmd()
+    experiment(model, test_loader)

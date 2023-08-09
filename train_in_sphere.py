@@ -32,9 +32,9 @@ def sphere_localized_loss_adjustment(model, top_eigenvectors, offset, radius = 1
     params_vector = parameters_to_vector(model.parameters())
     params_proj = t.mv(proj_matrix, params_vector)
     offset_proj = t.mv(proj_matrix, offset)
-    r_proj_params = t.sqrt(t.norm(params_proj-offset_proj))
+    r_proj_params = t.norm(params_proj-offset_proj)
     sphere_reg = lambda_sphere*(r_proj_params-radius)**2
-    orth_reg = lambda_orth*t.norm(params_vector-offset-params_proj+offset_proj)
+    orth_reg = lambda_orth*(t.norm(params_vector-offset-params_proj+offset_proj)**2)
     return sphere_reg, orth_reg
 
 
