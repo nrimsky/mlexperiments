@@ -6,6 +6,10 @@ import matplotlib.pyplot as plt
 from mlp_modular_movie import plot_embeddings_movie, run_movie_cmd
 from random import randint
 
+def get_module_parameters(model):
+    return model.fc.parameters()
+
+
 class ModuloAdditionDataset(data.Dataset):
     def __init__(self, d_vocab=114):
         super().__init__()
@@ -41,16 +45,22 @@ def make_circle_embeddings(embed_dim, vocab_size):
         for k in k_values
     ]
     return t.cat(M_k_list, dim=1)
+
+def make_random_embeddings(embed_dim, vocab_size):
+    return t.randn(vocab_size, embed_dim)
     
 class MLP(nn.Module):
     def __init__(self, embed_dim, vocab_size, hidden_dim):
         super().__init__()
         self.n_blocks = embed_dim // 2
+        self.embedding = nn.Parameter()
         self.embedding = nn.Parameter(make_circle_embeddings(embed_dim, vocab_size))
         self.linear1_weights = nn.Parameter(t.randn(self.n_blocks, 2, hidden_dim))
         self.linear2_weights = nn.Parameter(t.randn(self.n_blocks, hidden_dim, 2))
         self.linear3 = nn.Linear(embed_dim, vocab_size, bias=False)
         self.silu = nn.SiLU()
+        self.embedding.requires_grad = False
+
 
     def forward(self, x1, x2):
         x1 = self.embedding[x1].view(-1, self.n_blocks, 2)
@@ -60,6 +70,7 @@ class MLP(nn.Module):
         x2 = t.einsum('bnj,njk->bnk', x2, self.linear1_weights)
     
         x = x1 + x2
+        # x = x ** 2
         x = self.silu(x)
         x = t.einsum('bnk,nkj->bnj', x, self.linear2_weights)
         # Flatten the tensor from shape (batch_size, n_blocks, 2) to (batch_size, n_blocks*2) = (batch_size, embed_dim)
@@ -114,21 +125,23 @@ def get_train_test_loaders(train_frac, batch_size, vocab_size):
     return train_loader, test_loader
 
 def get_weight_norm(model):
-    return sum(p.norm() for p in model.parameters() if p.requires_grad)
+    return sum(t.norm(p, p=2) for p in model.parameters() if p.requires_grad)
 
-def train(vocab_size = 114, train_frac = 0.3, hidden_dim = 32, embed_dim = 16, save_frames = True):
+def train(vocab_size = 114, train_frac = 0.3, hidden_dim = 32, embed_dim = 16, save_frames = True, epochs = 30000):
     model = MLP(vocab_size=vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim)
     print(f"Number of parameters: {count_parameters(model)}")
     batch_size = 256
     train_loader, test_loader = get_train_test_loaders(train_frac, batch_size, vocab_size)
     optimizer = t.optim.SGD(model.parameters(), lr=0.02)
     criterion = nn.CrossEntropyLoss()
-    epochs = 20000
+    # epochs = 10000
     device = t.device("cuda" if t.cuda.is_available() else "cpu")
     model.to(device)
     old_acc = 0
     step = 0
     for epoch in range(epochs):
+        if epoch == epochs//2:
+            model.embedding.requires_grad = True
         model.train()
         train_loss = 0
         reg_loss = 0
@@ -136,7 +149,7 @@ def train(vocab_size = 114, train_frac = 0.3, hidden_dim = 32, embed_dim = 16, s
             x1, x2, target = x1.to(device), x2.to(device), target.to(device)
             optimizer.zero_grad()
             output = model(x1, x2)
-            reg = get_weight_norm(model) * 0.02
+            reg = get_weight_norm(model) * 0.005
             loss = criterion(output, target) + reg
             train_loss += loss.item()
             reg_loss += reg.item()
@@ -171,10 +184,10 @@ def test_model(model, test_loader, device, criterion):
 
 
 if __name__ == "__main__":
-    # train(vocab_size = 38, train_frac = 0.6, embed_dim = 12, hidden_dim = 8, save_frames = True)
-    # model = MLP(vocab_size=38, embed_dim=12, hidden_dim=8)
-    # model.load_state_dict(t.load("modular_addition.ckpt"))
-    # model.eval()
-    # plot_embeddings(model, 38)
-    # plot_embeddings_chunks(model)
+    train(vocab_size = 38, train_frac = 0.3, embed_dim = 12, hidden_dim = 8, save_frames = True, epochs = 100000)
+    model = MLP(vocab_size=38, embed_dim=12, hidden_dim=8)
+    model.load_state_dict(t.load("modular_addition.ckpt"))
+    model.eval()
+    plot_embeddings(model, 38)
+    plot_embeddings_chunks(model)
     run_movie_cmd()
