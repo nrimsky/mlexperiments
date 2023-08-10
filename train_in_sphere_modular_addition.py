@@ -1,7 +1,7 @@
 import torch as t
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
-from helpers import reshape_submodule_param_vector
-from mlp_modular import (
+from helpers import reshape_submodule_param_vector, get_weight_norm
+from mlp_modular2 import (
     MLP,
     test_model,
     get_train_test_loaders,
@@ -19,17 +19,15 @@ def hessian_eig(
     model,
     loss_fn,
     train_data_loader,
-    num_batches=30,
     device="cuda",
     n_top_vectors=200,
     param_extract_fn=None,
+    reg=0.002
 ):
     param_extract_fn = param_extract_fn or (lambda x: x.parameters())
     num_params = sum(p.numel() for p in param_extract_fn(model))
     subset_a, subset_b, subset_res = [], [], []
-    for batch_idx, (a, b, res) in enumerate(train_data_loader):
-        if batch_idx >= num_batches:
-            break
+    for a, b, res in train_data_loader:
         subset_a.append(a.to(device))
         subset_b.append(b.to(device))
         subset_res.append(res.to(device))
@@ -39,7 +37,7 @@ def hessian_eig(
 
     def compute_loss():
         output = model(subset_a, subset_b)
-        return loss_fn(output, subset_res)
+        return loss_fn(output, subset_res) + reg * get_weight_norm(model) # hacky way to add weight norm
 
     def hessian_vector_product(vector):
         model.zero_grad()
@@ -55,7 +53,7 @@ def hessian_eig(
 
     linear_operator = LinearOperator((num_params, num_params), matvec=matvec)
     eigenvalues, eigenvectors = eigsh(
-        linear_operator, k=n_top_vectors, tol=0.1, which="LM", return_eigenvectors=True
+        linear_operator, k=n_top_vectors, tol=0.001, which="LM", return_eigenvectors=True
     )
     tot = 0
     thresholds = [0.1, 1, 2, 10]
@@ -100,9 +98,9 @@ def sphere_localized_loss_adjustment(
     params_vector = parameters_to_vector(model.parameters())
     params_proj = t.mv(proj_matrix, params_vector)
     offset_proj = t.mv(proj_matrix, offset)
-    r_proj_params = t.sqrt(t.norm(params_proj - offset_proj))
+    r_proj_params = t.norm(params_proj - offset_proj)
     sphere_reg = lambda_sphere * (r_proj_params - radius) ** 2
-    orth_reg = lambda_orth * t.norm(params_vector - offset - params_proj + offset_proj)
+    orth_reg = lambda_orth * t.norm(params_vector - offset - params_proj + offset_proj) ** 2
     return sphere_reg, orth_reg
 
 
@@ -117,35 +115,41 @@ def train_in_sphere(
     n_epochs=3,
     device="cuda",
     lr_decay=0.999,
-    weight_decay=0.05,
+    weight_reg=0.05,
+    initial_params=None
 ):
     model.to(device)
     offset = parameters_to_vector(model.parameters()).detach()
+    if initial_params is None:
+        # reshape all eigenvectors to be the same shape as the model parameters
+        top_eigenvectors = t.stack(
+            [
+                reshape_submodule_param_vector(model, get_module_parameters, v)
+                for v in top_eigenvectors
+            ]
+        )
+        # Adjust model weights to be on the sphere of high eigenvectors
+        n_eigenvectors = top_eigenvectors.shape[0]
+        rand_vec = t.randn(n_eigenvectors)
+        unit_sphere_vec = rand_vec @ top_eigenvectors
+        unit_sphere_vec /= t.norm(unit_sphere_vec)
+        point_on_sphere = offset.to(device) + radius * unit_sphere_vec.to(device)
+        # load the point on the sphere into the model
+        vector_to_parameters(point_on_sphere, model.parameters())
+    else:
+        vector_to_parameters(initial_params, model.parameters())
+
     optimizer = t.optim.AdamW(
-        get_module_parameters(model), lr=lr, weight_decay=weight_decay
-    )
-    # reshape all eigenvectors to be the same shape as the model parameters
-    top_eigenvectors = t.stack(
-        [
-            reshape_submodule_param_vector(model, get_module_parameters, v)
-            for v in top_eigenvectors
-        ]
+        get_module_parameters(model), lr=lr, weight_decay=0
     )
     scheduler = t.optim.lr_scheduler.ExponentialLR(optimizer, gamma=lr_decay)
-    loss_fn = t.nn.CrossEntropyLoss()
-    # Adjust model weights to be on the sphere of high eigenvectors
-    n_eigenvectors = top_eigenvectors.shape[0]
-    rand_vec = t.randn(n_eigenvectors)
-    unit_sphere_vec = rand_vec @ top_eigenvectors
-    unit_sphere_vec /= t.norm(unit_sphere_vec)
-    point_on_sphere = offset.to(device) + radius * unit_sphere_vec.to(device)
-    # load the point on the sphere into the model
-    vector_to_parameters(point_on_sphere, model.parameters())
+    ce_loss = t.nn.CrossEntropyLoss()
     model.train()
     idx = 0
     tot_sphere_reg = 0
     tot_orth_reg = 0
     tot_ce_loss = 0
+    tot_weight_reg_loss = 0
     for epoch in range(n_epochs):
         for a, b, res in dataloader:
             idx += 1
@@ -159,47 +163,50 @@ def train_in_sphere(
                 lambda_orth,
                 device=device,
             )
-            loss_main = loss_fn(model(a.to(device), b.to(device)), res.to(device))
+            loss_main = ce_loss(model(a.to(device), b.to(device)), res.to(device))
+            weight_reg_loss = get_weight_norm(model) * weight_reg
             tot_sphere_reg += sphere_reg.item()
             tot_orth_reg += orth_reg.item()
             tot_ce_loss += loss_main.item()
-            loss = loss_main + sphere_reg + orth_reg
+            tot_weight_reg_loss += float(weight_reg_loss)
+            loss = loss_main + sphere_reg + orth_reg + weight_reg
             loss.backward()
             optimizer.step()
         scheduler.step()
         if epoch % 50 == 0:
             print(
-                f"Epoch {epoch}/{n_epochs}, avg_sphere_reg = {tot_sphere_reg/idx}, avg_orth_reg = {tot_orth_reg/idx}, avg_ce_loss = {tot_ce_loss/idx}"
+                f"Epoch {epoch}/{n_epochs}, avg_sphere_reg = {tot_sphere_reg/idx}, avg_orth_reg = {tot_orth_reg/idx}, avg_ce_loss = {tot_ce_loss/idx} avg_weight_reg_loss = {tot_weight_reg_loss/idx}"
             )
             idx = 0
             tot_sphere_reg = 0
             tot_orth_reg = 0
             tot_ce_loss = 0
-    val_loss, val_acc = test_model(model, dataloader, device=device, criterion=loss_fn)
+            tot_weight_reg_loss = 0
+    val_loss, val_acc = test_model(model, dataloader, device=device, criterion=ce_loss)
     print(f"Final validation loss: {val_loss}, final validation accuracy: {val_acc}")
     t.save(model.state_dict(), "modular_addition_sphere_model.pth")
     return model
 
 
-def main():
+def main(checkpoint_path = "modular_addition.ckpt"):
     # Parameters
-    VOCAB_SIZE = 114
-    EMBED_DIM = 14
+    VOCAB_SIZE = 38
+    EMBED_DIM = 8
     HIDDEN_DIM = 8
-    CHECKPOINT_PATH = "modular_addition.ckpt"
-    N_EPOCHS = 5000
-    N_EIGENVECTORS = 8
-    RADIUS = 20
+    N_EPOCHS = 4000
+    N_EIGENVECTORS = 24
     LAMBDA_SPHERE = 10
-    LAMBDA_ORTH = 20
-    LR = 0.02
+    LAMBDA_ORTH = 1
+    LR = 0.01
     LR_DECAY = 0.999
-    WEIGHT_DECAY = 0.05
-    # Main code
+    WEIGHT_REG = 0.005
+
+    # Used to calculate eigenvectors for sphere search 
     model = MLP(vocab_size=VOCAB_SIZE, embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM)
-    model.load_state_dict(t.load(CHECKPOINT_PATH))
+    model.load_state_dict(t.load(checkpoint_path))
     model.to(device="cuda")
     model.eval()
+
     loss_fn = t.nn.CrossEntropyLoss()
     train_loader, test_loader = get_train_test_loaders(
         train_frac=0.4, batch_size=256, vocab_size=VOCAB_SIZE
@@ -211,22 +218,29 @@ def main():
         device="cuda",
         n_top_vectors=N_EIGENVECTORS,
         param_extract_fn=get_module_parameters,
+        reg=WEIGHT_REG,
     )
-    train_in_sphere(
-        model,
-        train_loader,
-        eigenvectors,
-        radius=RADIUS,
-        lambda_sphere=LAMBDA_SPHERE,
-        lambda_orth=LAMBDA_ORTH,
-        lr=LR,
-        n_epochs=N_EPOCHS,
-        device="cuda",
-        lr_decay=LR_DECAY,
-        weight_decay=WEIGHT_DECAY,
-    )
-    plot_embeddings(model, VOCAB_SIZE)
-    plot_embeddings_chunks(model)
+
+    initial_params = None
+    for radius in [15, 20, 25, 30, 35, 40]:
+        train_in_sphere(
+            model,
+            train_loader,
+            eigenvectors,
+            radius=radius,
+            lambda_sphere=LAMBDA_SPHERE,
+            lambda_orth=LAMBDA_ORTH,
+            lr=LR,
+            n_epochs=N_EPOCHS,
+            device="cuda",
+            lr_decay=LR_DECAY,
+            weight_reg=WEIGHT_REG,
+            initial_params=initial_params
+        )
+        plot_embeddings_chunks(model, filename=f"embeddings_chunks_{radius}.png")
+        start_model = MLP(vocab_size=VOCAB_SIZE, embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM)
+        start_model.load_state_dict(t.load("modular_addition_sphere_model.pth"))
+        initial_params = parameters_to_vector(start_model.parameters()).detach().cuda()
 
 
 if __name__ == "__main__":
