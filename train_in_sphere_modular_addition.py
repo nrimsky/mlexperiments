@@ -5,7 +5,6 @@ from mlp_modular2 import (
     MLP,
     test_model,
     get_train_test_loaders,
-    plot_embeddings,
     plot_embeddings_chunks,
 )
 import torch as t
@@ -193,12 +192,12 @@ def main(checkpoint_path = "modular_addition.ckpt"):
     VOCAB_SIZE = 38
     EMBED_DIM = 8
     HIDDEN_DIM = 8
-    N_EPOCHS = 4000
-    N_EIGENVECTORS = 24
-    LAMBDA_SPHERE = 10
-    LAMBDA_ORTH = 1
+    N_EPOCHS = 10000
+    N_EIGENVECTORS = 30
+    LAMBDA_SPHERE = 20
+    LAMBDA_ORTH = .1
     LR = 0.01
-    LR_DECAY = 0.999
+    LR_DECAY = 0.9997
     WEIGHT_REG = 0.005
 
     # Used to calculate eigenvectors for sphere search 
@@ -222,7 +221,7 @@ def main(checkpoint_path = "modular_addition.ckpt"):
     )
 
     initial_params = None
-    for radius in [15, 20, 25, 30, 35, 40]:
+    for radius in [5, 10, 15, 20, 25, 30, 35, 40, 45, 50]:
         train_in_sphere(
             model,
             train_loader,
