@@ -120,18 +120,32 @@ class CNN(t.nn.Module):
         self.output_size = (self.output_size - kernel_size + 2 * padding) // stride + 1
         self.output_size = self.output_size // 2
         self.linear_input_size = output_channels * self.output_size * self.output_size
+
         self.fc1 = t.nn.Linear(self.linear_input_size, n_classes)
-        self.fc2 = t.nn.Linear(n_classes, 2*n_classes)
-        self.fc3 = t.nn.Linear(2*n_classes, n_classes)
-        self.fc = t.nn.Sequential(self.fc1,t.nn.ReLU(),self.fc2,t.nn.ReLU(),self.fc3)
+        self.fc2 = t.nn.Linear(n_classes, n_classes)
+        self.relu = t.nn.ReLU()
+
+        self.fc_1_act = None
+        self.conv_1_act = None
+        self.conv_2_act = None
 
     def forward(self, x):
         x = self.conv1(x)
+        self.conv_1_act = x
         x = self.conv2(x)
-        # Flatten the output of the second convolutional layer.
+        self.conv_2_act = x
         x = x.view(-1, self.linear_input_size)
-        x = self.fc(x)
+        x = self.fc1(x)
+        self.fc_1_act = x
+        x = self.relu(x)
+        x = self.fc2(x)
         return x
+    
+    def get_all_internal_states(self):
+        """
+        Return flattened vector of self.conv_1_act, self.conv_2_act, self.fc_1_act
+        """
+        return self.fc_1_act.flatten().detach().cpu().numpy()
 
 
 def train_single(data_loader_train, model, criterion, filename, n_epochs, initial_lr, lr_decay, patterns_per_num, print_pure=False):
