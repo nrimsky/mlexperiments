@@ -196,9 +196,6 @@ def perturb_in_direction(fname, patterns_per_num, direction, n_p=50, just_return
     plot_pertubation_results(loss_results, 'perturbation_loss_results.png', yaxis='Loss')
 
 
-
-
-
 def perturb_in_direction_per_eig(fname, patterns_per_num, direction, n_eig_dirs=50, n_orth_dirs=50):
     """
     fname: checkpoint file name
