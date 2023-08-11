@@ -43,7 +43,7 @@ def train_in_sphere(model, dataloader, top_eigenvectors, radius = 1, lambda_sphe
     model.to(device)
     offset = parameters_to_vector(model.parameters()).detach()
 
-    optimizer = t.optim.SGD(get_module_parameters(model), lr=lr)
+    optimizer = t.optim.SGD(get_module_parameters(model), lr=lr, weight_decay=0.0)
 
     # reshape all eigenvectors to be the same shape as the model parameters
     top_eigenvectors = t.stack([reshape_submodule_param_vector(model, get_module_parameters, v) for v in top_eigenvectors])
@@ -102,15 +102,15 @@ def train_in_sphere(model, dataloader, top_eigenvectors, radius = 1, lambda_sphe
 def main():
     # Load CNN from good_models/model_final_finetuned.ckpt
     model = CNN(input_size=28)
-    model.load_state_dict(t.load("good_models/model_final_finetuned.ckpt"))
+    model.load_state_dict(t.load("models/model_final_finetuned.ckpt"))
     model.to(device="cuda")
     model.eval()
     loss_fn = t.nn.CrossEntropyLoss()
     # Get opacity 0.5 data
     data_loader_train, data_loader_test = load_mnist_data(patterns_per_num=10, opacity=0.5)
-    _, _, eigenvectors = get_hessian_eigenvalues(model, loss_fn, data_loader_test, device="cuda", n_top_vectors=100, param_extract_fn=get_module_parameters)
+    _, _, eigenvectors = get_hessian_eigenvalues(model, loss_fn, data_loader_test, device="cuda", n_top_vectors=40, param_extract_fn=get_module_parameters)
     # Train in sphere
-    train_in_sphere(model, data_loader_train, eigenvectors, radius=2, lambda_sphere=10, lambda_orth=1, lr=0.01, n_epochs=10, device="cuda", patterns_per_num=10)
+    train_in_sphere(model, data_loader_train, eigenvectors, radius=2.5, lambda_sphere=15, lambda_orth=1, lr=0.005, n_epochs=10, device="cuda", patterns_per_num=10)
 
 def main2():
     # Load CNN from good_models/model_final_finetuned.ckpt
@@ -121,12 +121,12 @@ def main2():
     loss_fn = t.nn.CrossEntropyLoss()
     # Get pure number data
     data_loader_test_number, data_loader_test_pattern = load_pure_number_pattern_data(patterns_per_num=10, is_train=False)
-    _, _, eigenvectors = get_hessian_eigenvalues(model, loss_fn, data_loader_test_number, device="cuda", n_top_vectors=5, param_extract_fn=get_module_parameters)
+    _, _, eigenvectors = get_hessian_eigenvalues(model, loss_fn, data_loader_test_pattern, device="cuda", n_top_vectors=35, param_extract_fn=get_module_parameters)
     # Get opacity 0.5 data
     data_loader_train, _ = load_mnist_data(patterns_per_num=10, opacity=0.5)
     # Train in sphere
-    train_in_sphere(model, data_loader_train, eigenvectors, radius=.5, lambda_sphere=10, lambda_orth=2, lr=0.01, n_epochs=10, device="cuda", patterns_per_num=10)
+    train_in_sphere(model, data_loader_train, eigenvectors, radius=1, lambda_sphere=15, lambda_orth=1, lr=0.005, n_epochs=10, device="cuda", patterns_per_num=10)
 
 
 if __name__ == '__main__':
-    main2()
+    main()

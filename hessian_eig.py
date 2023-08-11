@@ -44,7 +44,7 @@ def get_hessian_eigenvalues(model, loss_fn, train_data_loader, num_batches=30, d
         return hessian_vector_product(v_tensor).cpu().detach().numpy()
     
     linear_operator = LinearOperator((num_params, num_params), matvec=matvec)
-    eigenvalues, eigenvectors = eigsh(linear_operator, k=n_top_vectors, tol=0.1, which='LM', return_eigenvectors=True)
+    eigenvalues, eigenvectors = eigsh(linear_operator, k=n_top_vectors, tol=0.001, which='LM', return_eigenvectors=True)
     tot = 0
     thresholds = [0.1, 1, 2, 10]
     for e in eigenvalues:
