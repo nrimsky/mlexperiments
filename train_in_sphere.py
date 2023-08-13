@@ -1,6 +1,6 @@
 import torch as t
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
-from train_mnist import CNN, load_mnist_data, test_pure_and_opacity, load_pure_number_pattern_data
+from train_mnist import CNN, load_mnist_data, test_pure_and_opacity, load_pure_number_pattern_data, test
 from hessian_eig import get_hessian_eigenvalues
 from tqdm import tqdm
 from helpers import reshape_submodule_param_vector
@@ -188,7 +188,7 @@ def train_in_sphere(model, dataloader, top_eigenvectors, radius = 1, lambda_sphe
     t.save(model.state_dict(), 'sphere_model_2.pth')
     return model
 
-def main():
+def unsupervised():
     # Load CNN from good_models/model_final_finetuned.ckpt
     model = CNN(input_size=28)
     model.load_state_dict(t.load("models/model_final_finetuned.ckpt"))
@@ -202,23 +202,45 @@ def main():
     # Train in sphere
     train_in_sphere(model, data_loader_train, eigenvectors, radius=2.5, lambda_sphere=15, lambda_orth=1, lr=0.005, n_epochs=10, device="cuda", patterns_per_num=10)
 
-def main2():
-    # Load CNN from good_models/model_final_finetuned.ckpt
-    model = CNN(input_size=28)
-    model.load_state_dict(t.load("models/model_final_finetuned.ckpt"))
-    model.to(device="cuda")
-    model.eval()
+
+def plot_semi_supervised_results(results):
+    pass
+
+def semi_supervised(sphere):
+    """
+    sphere: 'number' or 'pattern' - which eigenvectors to use
+    """
     loss_fn = t.nn.CrossEntropyLoss()
-    # Get pure number data
+    radii = [0.5, 1, 1.5, 2, 2.5, 3]
+    eigen_loader = None
     data_loader_test_number, data_loader_test_pattern = load_pure_number_pattern_data(patterns_per_num=10, is_train=False)
-    _, _, eigenvectors = get_hessian_eigenvalues(model, loss_fn, data_loader_test_number, device="cuda", n_top_vectors=35, param_extract_fn=get_module_parameters)
-    # Get opacity 0.5 data
-    data_loader_train, _ = load_mnist_data(patterns_per_num=10, opacity=0.5)
-    # Train in sphere
-    train_in_sphere(model, data_loader_train, eigenvectors, radius=1, lambda_sphere=15, lambda_orth=1, lr=0.005, n_epochs=10, device="cuda", patterns_per_num=10)
+    if sphere == 'number':
+        eigen_loader = data_loader_test_number
+    elif sphere == 'pattern':
+        eigen_loader = data_loader_test_pattern
+    else:
+        raise ValueError("sphere must be 'number' or 'pattern'")
+    _, _, eigenvectors = get_hessian_eigenvalues(model, loss_fn, eigen_loader, device="cuda", n_top_vectors=35, param_extract_fn=get_module_parameters)
+    data_loader_train, data_loader_test = load_mnist_data(patterns_per_num=10, opacity=0.5)
+    results = []
+    for radius in radii:
+        model = CNN(input_size=28)
+        model.load_state_dict(t.load("models/model_final_finetuned.ckpt"))
+        model.to(device="cuda")
+        model.eval()
+        train_in_sphere(model, data_loader_train, eigenvectors, radius=1, lambda_sphere=15, lambda_orth=1, lr=0.005, n_epochs=10, device="cuda", patterns_per_num=10)
+        sphere_model = CNN(input_size=28)
+        sphere_model.load_state_dict(t.load("sphere_model_2.pth"))
+        sphere_model.to(device="cuda")
+        sphere_model.eval()
+        acc_number, loss_number = test(sphere_model, data_loader_test_number, device="cuda", calc_loss=True, do_print=False)
+        acc_pattern, loss_pattern = test(sphere_model, data_loader_test_pattern, device="cuda", calc_loss=True, do_print=False)
+        acc_op, loss_op = test(sphere_model, data_loader_test, device="cuda", calc_loss=True, do_print=False)
+        print(f"Radius: {radius}, acc_number: {acc_number}, loss_number: {loss_number}, acc_pattern: {acc_pattern}, loss_pattern: {loss_pattern}, acc_op: {acc_op}, loss_op: {loss_op}")
+        results.append((radius, acc_number, loss_number, acc_pattern, loss_pattern, acc_op, loss_op))
+    plot_semi_supervised_results(results)
 
-
-def main3():
+def activation_similarity_eigenmodel():
     model = CNN(input_size=28)
     model.load_state_dict(t.load("models/model_final_finetuned.ckpt"))
     model.to(device="cuda")
@@ -227,4 +249,4 @@ def main3():
     test_eigen_model(model, dataset1=data_loader_test_pattern, dataset2=data_loader_test_number, n_top_vectors=1, n_batches=20, device="cuda")
 
 if __name__ == '__main__':
-    main3()
+    unsupervised()
