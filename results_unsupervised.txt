@@ -1,0 +1,6 @@
+Radius: 0.5, acc_number: 89.51, loss_number: 0.40609987905830336, acc_pattern: 79.05, loss_pattern: 0.8299681088726991, acc_op: 94.44, loss_op: 0.15793242924520448
+Radius: 1, acc_number: 90.16, loss_number: 0.3334712695069374, acc_pattern: 83.61, loss_pattern: 0.6361670928775884, acc_op: 90.33, loss_op: 0.2930433054923252
+Radius: 1.5, acc_number: 84.86, loss_number: 0.48779643521567057, acc_pattern: 56.43, loss_pattern: 1.5003230852685916, acc_op: 73.15, loss_op: 0.734353163249933
+Radius: 2, acc_number: 65.41, loss_number: 1.1218012730786755, acc_pattern: 30.48, loss_pattern: 1.8721784041945342, acc_op: 42.47, loss_op: 1.4754458977158662
+Radius: 2.5, acc_number: 80.85, loss_number: 0.5917668643460912, acc_pattern: 61.99, loss_pattern: 1.333795170115817, acc_op: 80.72, loss_op: 0.5251797211777632
+Radius: 3, acc_number: 48.88, loss_number: 1.397832583849597, acc_pattern: 23.55, loss_pattern: 2.182667481671473, acc_op: 31.98, loss_op: 1.7037171550617096
