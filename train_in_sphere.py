@@ -222,6 +222,7 @@ def unsupervised():
 def semi_supervised(sphere):
     """
     sphere: 'number' or 'pattern' - which eigenvectors to use
+    TODO: reduce radius range for `number` sphere as it's more sensitive to radius -> contributes lower eigenvalues??
     """
     model = CNN(input_size=28)
     model.load_state_dict(t.load("models/model_final_finetuned.ckpt"))
