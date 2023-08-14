@@ -3,7 +3,7 @@ from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from train_mnist import CNN, load_mnist_data, test_pure_and_opacity, load_pure_number_pattern_data, test
 from hessian_eig import get_hessian_eigenvalues
 from tqdm import tqdm
-from helpers import reshape_submodule_param_vector
+from helpers import reshape_submodule_param_vector, plot_semi_supervised_results, plot_unsupervised_results
 import numpy as np
 
 def get_module_parameters(model):
@@ -189,27 +189,44 @@ def train_in_sphere(model, dataloader, top_eigenvectors, radius = 1, lambda_sphe
     return model
 
 def unsupervised():
-    # Load CNN from good_models/model_final_finetuned.ckpt
     model = CNN(input_size=28)
     model.load_state_dict(t.load("models/model_final_finetuned.ckpt"))
     model.to(device="cuda")
     model.eval()
-    test_pure_and_opacity(model, 10, device="cuda")
     loss_fn = t.nn.CrossEntropyLoss()
-    # Get opacity 0.5 data
+    radii = [0.5, 1, 1.5, 2, 2.5, 3]
+    data_loader_test_number, data_loader_test_pattern = load_pure_number_pattern_data(patterns_per_num=10, is_train=False)
     data_loader_train, data_loader_test = load_mnist_data(patterns_per_num=10, opacity=0.5)
-    _, _, eigenvectors = get_hessian_eigenvalues(model, loss_fn, data_loader_test, device="cuda", n_top_vectors=40, param_extract_fn=get_module_parameters)
-    # Train in sphere
-    train_in_sphere(model, data_loader_train, eigenvectors, radius=2.5, lambda_sphere=15, lambda_orth=1, lr=0.005, n_epochs=10, device="cuda", patterns_per_num=10)
+    _, _, eigenvectors = get_hessian_eigenvalues(model, loss_fn, data_loader_train, device="cuda", n_top_vectors=35, param_extract_fn=get_module_parameters)
+    results = []
+    with open('results_unsupervised.txt', 'w') as f:
+        for radius in radii:
+            model = CNN(input_size=28)
+            model.load_state_dict(t.load("models/model_final_finetuned.ckpt"))
+            model.to(device="cuda")
+            model.eval()
+            train_in_sphere(model, data_loader_train, eigenvectors, radius=radius, lambda_sphere=15, lambda_orth=1, lr=0.005, n_epochs=10, device="cuda", patterns_per_num=10)
+            sphere_model = CNN(input_size=28)
+            sphere_model.load_state_dict(t.load("sphere_model_2.pth"))
+            sphere_model.to(device="cuda")
+            sphere_model.eval()
+            acc_number, loss_number = test(sphere_model, data_loader_test_number, device="cuda", calc_loss=True, do_print=False)
+            acc_pattern, loss_pattern = test(sphere_model, data_loader_test_pattern, device="cuda", calc_loss=True, do_print=False)
+            acc_op, loss_op = test(sphere_model, data_loader_test, device="cuda", calc_loss=True, do_print=False)
+            print(f"Radius: {radius}, acc_number: {acc_number}, loss_number: {loss_number}, acc_pattern: {acc_pattern}, loss_pattern: {loss_pattern}, acc_op: {acc_op}, loss_op: {loss_op}")
+            results.append((radius, acc_number, loss_number, acc_pattern, loss_pattern, acc_op, loss_op))
+            f.write(f"Radius: {radius}, acc_number: {acc_number}, loss_number: {loss_number}, acc_pattern: {acc_pattern}, loss_pattern: {loss_pattern}, acc_op: {acc_op}, loss_op: {loss_op}\n")
+    plot_unsupervised_results(results)
 
-
-def plot_semi_supervised_results(results):
-    pass
 
 def semi_supervised(sphere):
     """
     sphere: 'number' or 'pattern' - which eigenvectors to use
     """
+    model = CNN(input_size=28)
+    model.load_state_dict(t.load("models/model_final_finetuned.ckpt"))
+    model.to(device="cuda")
+    model.eval()
     loss_fn = t.nn.CrossEntropyLoss()
     radii = [0.5, 1, 1.5, 2, 2.5, 3]
     eigen_loader = None
@@ -223,22 +240,24 @@ def semi_supervised(sphere):
     _, _, eigenvectors = get_hessian_eigenvalues(model, loss_fn, eigen_loader, device="cuda", n_top_vectors=35, param_extract_fn=get_module_parameters)
     data_loader_train, data_loader_test = load_mnist_data(patterns_per_num=10, opacity=0.5)
     results = []
-    for radius in radii:
-        model = CNN(input_size=28)
-        model.load_state_dict(t.load("models/model_final_finetuned.ckpt"))
-        model.to(device="cuda")
-        model.eval()
-        train_in_sphere(model, data_loader_train, eigenvectors, radius=1, lambda_sphere=15, lambda_orth=1, lr=0.005, n_epochs=10, device="cuda", patterns_per_num=10)
-        sphere_model = CNN(input_size=28)
-        sphere_model.load_state_dict(t.load("sphere_model_2.pth"))
-        sphere_model.to(device="cuda")
-        sphere_model.eval()
-        acc_number, loss_number = test(sphere_model, data_loader_test_number, device="cuda", calc_loss=True, do_print=False)
-        acc_pattern, loss_pattern = test(sphere_model, data_loader_test_pattern, device="cuda", calc_loss=True, do_print=False)
-        acc_op, loss_op = test(sphere_model, data_loader_test, device="cuda", calc_loss=True, do_print=False)
-        print(f"Radius: {radius}, acc_number: {acc_number}, loss_number: {loss_number}, acc_pattern: {acc_pattern}, loss_pattern: {loss_pattern}, acc_op: {acc_op}, loss_op: {loss_op}")
-        results.append((radius, acc_number, loss_number, acc_pattern, loss_pattern, acc_op, loss_op))
-    plot_semi_supervised_results(results)
+    with open(f'results_{sphere}.txt', 'w') as f:
+        for radius in radii:
+            model = CNN(input_size=28)
+            model.load_state_dict(t.load("models/model_final_finetuned.ckpt"))
+            model.to(device="cuda")
+            model.eval()
+            train_in_sphere(model, data_loader_train, eigenvectors, radius=radius, lambda_sphere=15, lambda_orth=1, lr=0.005, n_epochs=10, device="cuda", patterns_per_num=10)
+            sphere_model = CNN(input_size=28)
+            sphere_model.load_state_dict(t.load("sphere_model_2.pth"))
+            sphere_model.to(device="cuda")
+            sphere_model.eval()
+            acc_number, loss_number = test(sphere_model, data_loader_test_number, device="cuda", calc_loss=True, do_print=False)
+            acc_pattern, loss_pattern = test(sphere_model, data_loader_test_pattern, device="cuda", calc_loss=True, do_print=False)
+            acc_op, loss_op = test(sphere_model, data_loader_test, device="cuda", calc_loss=True, do_print=False)
+            print(f"Radius: {radius}, acc_number: {acc_number}, loss_number: {loss_number}, acc_pattern: {acc_pattern}, loss_pattern: {loss_pattern}, acc_op: {acc_op}, loss_op: {loss_op}")
+            results.append((radius, acc_number, loss_number, acc_pattern, loss_pattern, acc_op, loss_op))
+            f.write(f"Radius: {radius}, acc_number: {acc_number}, loss_number: {loss_number}, acc_pattern: {acc_pattern}, loss_pattern: {loss_pattern}, acc_op: {acc_op}, loss_op: {loss_op}\n")
+    plot_semi_supervised_results(results, sphere)
 
 def activation_similarity_eigenmodel():
     model = CNN(input_size=28)
@@ -249,4 +268,6 @@ def activation_similarity_eigenmodel():
     test_eigen_model(model, dataset1=data_loader_test_pattern, dataset2=data_loader_test_number, n_top_vectors=1, n_batches=20, device="cuda")
 
 if __name__ == '__main__':
+    # semi_supervised('pattern')
+    semi_supervised('number')
     unsupervised()

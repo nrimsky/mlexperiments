@@ -71,3 +71,82 @@ def plot_pertubation_results(results, fname, yaxis):
 
 def get_weight_norm(model):
     return sum((p ** 2).sum() for p in model.parameters() if p.requires_grad)
+
+def plot_semi_supervised_results(results, sphere):
+    radii = [result[0] for result in results]
+    
+    # Accuracy
+    acc_number = [result[1] for result in results]
+    acc_pattern = [result[3] for result in results]
+    acc_op = [result[5] for result in results]
+    
+    # Loss
+    loss_number = [result[2] for result in results]
+    loss_pattern = [result[4] for result in results]
+    loss_op = [result[6] for result in results]
+    
+    # Plotting Losses
+    plt.clf()
+    plt.figure(figsize=(10,6))
+    plt.plot(radii, loss_number, 'rx', label='Number')
+    plt.plot(radii, loss_pattern, 'gx', label='Pattern')
+    plt.plot(radii, loss_op, 'bx', label='Mixed')
+    plt.title(f'Searching sphere of top {sphere} loss Hessian eigenvectors')
+    plt.xlabel('Radius')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(f'semi_supervised_loss_{sphere}.png', format='png')
+    
+    # Plotting Accuracies
+    plt.clf()
+    plt.figure(figsize=(10,6))
+    plt.plot(radii, acc_number, 'rx', label='Number')
+    plt.plot(radii, acc_pattern, 'gx', label='Pattern')
+    plt.plot(radii, acc_op, 'bx', label='Mixed')
+    plt.title(f'Searching sphere of top {sphere} loss Hessian eigenvectors')
+    plt.xlabel('Radius')
+    plt.ylabel('Accuracy')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(f'semi_supervised_accuracy_{sphere}.png', format='png')
+
+
+def plot_unsupervised_results(results):
+    radii = [result[0] for result in results]
+    
+    # Accuracy
+    acc_number = [result[1] for result in results]
+    acc_pattern = [result[3] for result in results]
+    acc_op = [result[5] for result in results]
+    
+    # Loss
+    loss_number = [result[2] for result in results]
+    loss_pattern = [result[4] for result in results]
+    loss_op = [result[6] for result in results]
+    
+    # Plotting Losses
+    plt.clf()
+    plt.figure(figsize=(10,6))
+    plt.plot(radii, loss_number, 'rx', label='Number')
+    plt.plot(radii, loss_pattern, 'gx', label='Pattern')
+    plt.plot(radii, loss_op, 'bx', label='Mixed')
+    plt.title(f'Searching sphere of top loss Hessian eigenvectors')
+    plt.xlabel('Radius')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(f'unsupervised_loss.png', format='png')
+    
+    # Plotting Accuracies
+    plt.clf()
+    plt.figure(figsize=(10,6))
+    plt.plot(radii, acc_number, 'rx', label='Number')
+    plt.plot(radii, acc_pattern, 'gx', label='Pattern')
+    plt.plot(radii, acc_op, 'bx', label='Mixed')
+    plt.title(f'Searching sphere of top loss Hessian eigenvectors')
+    plt.xlabel('Radius')
+    plt.ylabel('Accuracy')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(f'unsupervised_accuracy.png', format='png')
