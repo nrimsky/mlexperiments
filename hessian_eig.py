@@ -387,23 +387,17 @@ def test_linear_circuit_decomp(fname="models/model_final_finetuned.ckpt", patter
     loss_fn = t.nn.CrossEntropyLoss()
     data_loader_test_number, data_loader_test_pattern = load_pure_number_pattern_data(patterns_per_num, is_train=False)
     _, data_loader_05_test = load_mnist_data(patterns_per_num, opacity=0.5)
-    _, eigenvalues_number, eigenvectors_number = get_hessian_eigenvalues(model, loss_fn, data_loader_test_number, num_batches=50, device="cuda", n_top_vectors=n)
-    _, eigenvalues_pattern, eigenvectors_pattern = get_hessian_eigenvalues(model, loss_fn, data_loader_test_pattern, num_batches=50, device="cuda", n_top_vectors=n)
-    _, eigenvalues_05, eigenvectors_05 = get_hessian_eigenvalues(model, loss_fn, data_loader_05_test, num_batches=50, device="cuda", n_top_vectors=n)
-
-    H_05 = get_hessian(eigenvectors_05, eigenvalues_05)
-    H_number = get_hessian(eigenvectors_number, eigenvalues_number)
-    H_pattern = get_hessian(eigenvectors_pattern, eigenvalues_pattern)
+    _, _, eigenvectors_number = get_hessian_eigenvalues(model, loss_fn, data_loader_test_number, num_batches=50, device="cuda", n_top_vectors=n)
+    _, _, eigenvectors_pattern = get_hessian_eigenvalues(model, loss_fn, data_loader_test_pattern, num_batches=50, device="cuda", n_top_vectors=n)
+    _, _, eigenvectors_05 = get_hessian_eigenvalues(model, loss_fn, data_loader_05_test, num_batches=50, device="cuda", n_top_vectors=n)
 
     top_numbers = eigenvectors_number[-top_vecs:]
     top_patterns = eigenvectors_pattern[-top_vecs:]
 
-    top_number_proj = np.matmul(orthogonal_complement(eigenvectors_05), top_number) 
-    top_pattern_proj = np.matmul(orthogonal_complement(eigenvectors_05), top_pattern)
+    number_vector = [np.linalg.norm(np.matmul(orthogonal_complement(eigenvectors_05), v)) for v in top_numbers]
+    pattern_vector = [np.linalg.norm(np.matmul(orthogonal_complement(eigenvectors_05), v)) for v in top_patterns]
 
-    number_vector = np.linalg.norm(top_number_proj, axis=1)
-    pattern_vector = np.linalg.norm(top_pattern_proj, axis = 1)
-    return(number_vector, pattern_vector)
+    print(number_vector, pattern_vector)
 
 
 
