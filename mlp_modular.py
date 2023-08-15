@@ -44,7 +44,9 @@ def make_circle_embeddings(embed_dim, vocab_size):
         ], dim=1)
         for k in k_values
     ]
-    return t.cat(M_k_list, dim=1)
+    embeddings = t.cat(M_k_list, dim=1)
+    embeddings *= 0.7
+    return embeddings
 
 def make_random_embeddings(embed_dim, vocab_size):
     return t.randn(vocab_size, embed_dim)
@@ -149,7 +151,7 @@ def train(vocab_size = 114, train_frac = 0.3, hidden_dim = 32, embed_dim = 16, s
             x1, x2, target = x1.to(device), x2.to(device), target.to(device)
             optimizer.zero_grad()
             output = model(x1, x2)
-            reg = get_weight_norm(model) * 0.005
+            reg = get_weight_norm(model) * 0.02
             loss = criterion(output, target) + reg
             train_loss += loss.item()
             reg_loss += reg.item()
@@ -184,7 +186,7 @@ def test_model(model, test_loader, device, criterion):
 
 
 if __name__ == "__main__":
-    train(vocab_size = 38, train_frac = 0.3, embed_dim = 12, hidden_dim = 8, save_frames = True, epochs = 100000)
+    train(vocab_size = 38, train_frac = 0.8, embed_dim = 6, hidden_dim = 8, save_frames = True, epochs = 40000)
     model = MLP(vocab_size=38, embed_dim=12, hidden_dim=8)
     model.load_state_dict(t.load("modular_addition.ckpt"))
     model.eval()
