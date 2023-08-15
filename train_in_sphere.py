@@ -268,6 +268,14 @@ def activation_similarity_eigenmodel():
     data_loader_test_number, data_loader_test_pattern = load_pure_number_pattern_data(patterns_per_num=10, is_train=False)
     test_eigen_model(model, dataset1=data_loader_test_pattern, dataset2=data_loader_test_number, n_top_vectors=1, n_batches=20, device="cuda")
 
+
+
+
+
+
+
+
+
 if __name__ == '__main__':
     # semi_supervised('pattern')
     semi_supervised('number')

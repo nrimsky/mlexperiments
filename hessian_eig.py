@@ -276,6 +276,15 @@ def perturb_in_direction_per_eig(fname, patterns_per_num, direction, n_eig_dirs=
         plot_pertubation_results(acc_results, f'perturbation_acc_results_{direction}_eig_{idx}.png', yaxis='Accuracy (%)')
         plot_pertubation_results(loss_results, f'perturbation_loss_results_{direction}_eig_{idx}.png.png', yaxis='Loss')
 
+
+def get_hessian(eigenvectors, eigenvalues):
+    eigenvectors = np.array(eigenvectors)
+    eigenvalues = np.array(eigenvalues)
+    assert len(eigenvectors) == len(eigenvalues), "The number of eigenvectors and eigenvalues must match"
+    diag_matrix = np.diag(eigenvalues)
+    approx_matrix = eigenvectors.T @ diag_matrix @ eigenvectors
+    return approx_matrix
+
 def save_approx_hessian(fname, n=150, patterns_per_num=10):
     """
     Get top n eigenvectors for pure patterns, pure numbers, and mixed opacity 0.5 data
@@ -296,23 +305,7 @@ def save_approx_hessian(fname, n=150, patterns_per_num=10):
     _, eigenvalues_number, eigenvectors_number = get_hessian_eigenvalues(model, loss_fn, data_loader_test_number, num_batches=50, device="cuda", n_top_vectors=n)
     _, eigenvalues_pattern, eigenvectors_pattern = get_hessian_eigenvalues(model, loss_fn, data_loader_test_pattern, num_batches=50, device="cuda", n_top_vectors=n)
     _, eigenvalues_05, eigenvectors_05 = get_hessian_eigenvalues(model, loss_fn, data_loader_05_test, num_batches=50, device="cuda", n_top_vectors=n)
-    
-    # Function to get hessian given eigenvectors and eigenvalues
-    def get_hessian(eigenvectors, eigenvalues):
-        # Ensure inputs are numpy arrays
-        eigenvectors = np.array(eigenvectors)
-        eigenvalues = np.array(eigenvalues)
 
-        # Check if eigenvectors and eigenvalues have correct sizes
-        assert len(eigenvectors) == len(eigenvalues), "The number of eigenvectors and eigenvalues must match"
-
-        # Create diagonal matrix from eigenvalues
-        diag_matrix = np.diag(eigenvalues)
-
-        # Reconstruct the matrix using spectral theorem (A = QΛQ')
-        approx_matrix = eigenvectors.T @ diag_matrix @ eigenvectors
-
-        return approx_matrix
     # Get Hessian for each dataset
     H_number = get_hessian(eigenvectors_number, eigenvalues_number)
     H_pattern = get_hessian(eigenvectors_pattern, eigenvalues_pattern)
@@ -339,5 +332,56 @@ def save_approx_hessian(fname, n=150, patterns_per_num=10):
 #         get_hessian_eig_mnist(f"./models/model_{version}.ckpt", patterns_per_num=patterns_per_num, opacity=opacity, use_mixed_dataloader=use_mixed_dataloader)
 
 
+    
+def measure_loss_in_valley(fname="models/model_final_finetuned.ckpt", patterns_per_num=10, n=50):
+    # Load model
+    model = CNN(input_size=28)
+    model.load_state_dict(t.load(fname))
+    model.to(device="cuda")
+    model.eval()
+    loss_fn = t.nn.CrossEntropyLoss()
+    data_loader_test_number, data_loader_test_pattern = load_pure_number_pattern_data(patterns_per_num, is_train=False)
+    _, data_loader_05_test = load_mnist_data(patterns_per_num, opacity=0.5)
+    _, eigenvalues_number, eigenvectors_number = get_hessian_eigenvalues(model, loss_fn, data_loader_test_number, num_batches=50, device="cuda", n_top_vectors=n)
+    _, eigenvalues_pattern, eigenvectors_pattern = get_hessian_eigenvalues(model, loss_fn, data_loader_test_pattern, num_batches=50, device="cuda", n_top_vectors=n)
+    _, eigenvalues_05, eigenvectors_05 = get_hessian_eigenvalues(model, loss_fn, data_loader_05_test, num_batches=50, device="cuda", n_top_vectors=n)
+
+    H_05 = get_hessian(eigenvectors_05, eigenvalues_05)
+    H_number = get_hessian(eigenvectors_number, eigenvalues_number)
+    H_pattern = get_hessian(eigenvectors_pattern, eigenvalues_pattern)
+
+    top_number = eigenvectors_number[-1]
+    top_pattern = eigenvectors_pattern[-1]
+
+    top_number_proj = np.matmul(orthogonal_complement(eigenvectors_pattern), top_number) 
+    top_pattern_proj = np.matmul(orthogonal_complement(eigenvectors_number), top_pattern)
+
+    # normalize
+    top_number_proj = top_number_proj / np.linalg.norm(top_number_proj)
+    top_pattern_proj = top_pattern_proj / np.linalg.norm(top_pattern_proj)
+
+    H_op_number = top_number_proj.T @ H_05 @ top_number_proj
+    H_op_pattern = top_pattern_proj.T @ H_05 @ top_pattern_proj
+
+    print(f"H_op proj number: {H_op_number}")
+    print(f"H_op proj pattern: {H_op_pattern}")
+
+    H_number_number = top_number_proj.T @ H_number @ top_number_proj
+    H_number_pattern = top_pattern_proj.T @ H_number @ top_pattern_proj
+
+    print(f"H_number proj number: {H_number_number}")
+    print(f"H_number proj pattern: {H_number_pattern}")
+
+    H_pattern_number = top_number_proj.T @ H_pattern @ top_number_proj
+    H_pattern_pattern = top_pattern_proj.T @ H_pattern @ top_pattern_proj
+
+    print(f"H_pattern proj number: {H_pattern_number}")
+    print(f"H_pattern proj pattern: {H_pattern_pattern}")
+
+
+
+
+
+
 if __name__ == "__main__":
-    perturb_in_direction_per_eig("models/model_final_finetuned.ckpt", 10, "pattern", n_eig_dirs=10, n_orth_dirs=50)
+    measure_loss_in_valley()
