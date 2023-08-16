@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.utils.data as data
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
-from mlp_modular_movie import plot_embeddings_movie, run_movie_cmd
+from modular_addition.generate_movie import plot_embeddings_movie, run_movie_cmd
 from random import randint
 
 def get_module_parameters(model):

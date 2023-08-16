@@ -1,7 +1,7 @@
 import torch as t
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
-from train_mnist import CNN, load_mnist_data, test_pure_and_opacity, load_pure_number_pattern_data, test
-from hessian_eig import get_hessian_eigenvalues
+from mnist.train_mnist import CNN, load_mnist_data, test_pure_and_opacity, load_pure_number_pattern_data, test
+from mnist.hessian_eigenvector_projection import get_hessian_eigenvalues
 from tqdm import tqdm
 from helpers import reshape_submodule_param_vector, plot_semi_supervised_results, plot_unsupervised_results
 import numpy as np
@@ -269,14 +269,7 @@ def activation_similarity_eigenmodel():
     test_eigen_model(model, dataset1=data_loader_test_pattern, dataset2=data_loader_test_number, n_top_vectors=1, n_batches=20, device="cuda")
 
 
-
-
-
-
-
-
-
 if __name__ == '__main__':
-    # semi_supervised('pattern')
+    semi_supervised('pattern')
     semi_supervised('number')
     unsupervised()

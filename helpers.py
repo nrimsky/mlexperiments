@@ -51,6 +51,11 @@ def orthogonal_complement(eigenvector_matrix):
     returns: a matrix of orthogonal vectors (n_weights x n_weights)
     """
     return np.eye(eigenvector_matrix.shape[-1]) - np.matmul(np.transpose(eigenvector_matrix), eigenvector_matrix)
+
+def get_weight_norm(model):
+    return sum((p ** 2).sum() for p in model.parameters() if p.requires_grad)
+
+# Plotting functions
     
 def plot_pertubation_results(results, fname, yaxis):
     t_values = [result[0] for result in results]
@@ -68,9 +73,6 @@ def plot_pertubation_results(results, fname, yaxis):
     plt.title(f'Model {yaxis} for different t values')
     plt.legend()
     plt.savefig(fname, format='png')
-
-def get_weight_norm(model):
-    return sum((p ** 2).sum() for p in model.parameters() if p.requires_grad)
 
 def plot_semi_supervised_results(results, sphere):
     radii = [result[0] for result in results]

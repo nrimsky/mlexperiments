@@ -26,7 +26,7 @@ def plot_embeddings_movie(model, step):
     if rows * cols < n:  # if not enough subplots, add an extra column
         cols += 1
     # visualise each vocab_size x 2 chunk in a subplot
-    fig, axs = plt.subplots(rows, cols, figsize=(30, 15))
+    _, axs = plt.subplots(rows, cols, figsize=(30, 15))
     axs = axs.flatten()  # flatten the array of axes to simplify indexing
     for i, chunk in enumerate(chunked):
         axs[i].scatter(chunk[:, 0], chunk[:, 1])
