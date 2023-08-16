@@ -144,6 +144,7 @@ def train(vocab_size = 114, train_frac = 0.3, hidden_dim = 32, embed_dim = 16, s
     for epoch in range(epochs):
         if epoch == epochs//2:
             model.embedding.requires_grad = True
+            optimizer = t.optim.SGD(model.parameters(), lr=0.005)
         model.train()
         train_loss = 0
         reg_loss = 0
