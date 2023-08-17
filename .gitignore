@@ -10,3 +10,5 @@ mnist/models
 modular_addition/models
 modular_addition/frames
 modular_addition/movies
+results_*.txt
+*.pth
