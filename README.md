@@ -9,7 +9,7 @@
 - `mnist/` contains the code for the MNIST experiments (modified MNIST digit classification task with superimposed random patterns)
 - `modular_addition/` contains the code for the modular addition experiments (addition of two numbers embedded as tokens modulo n)
 - `results/` contains interesting results and artifacts from experiments
-- `diagrams/` contains code and plots used to generated diagrams in the posts
+- `diagrams/` contains code and plots used to generate diagrams in the posts
 - `misc/` contains code not directly related to the experiments or referenced in the posts, produced during the course of the project
 
 ### Installing dependencies
