@@ -3,7 +3,7 @@ data
 *.ckpt
 venv
 .vscode
-
+.DS_Store
 *.pt
 frames
 mnist/models 
