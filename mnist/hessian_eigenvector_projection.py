@@ -1,8 +1,8 @@
 import torch as t
-from mnist.train_mnist import CNN, load_mnist_data, load_pure_number_pattern_data, CombinedDataLoader, test
+from train_mnist import CNN, load_mnist_data, load_pure_number_pattern_data, CombinedDataLoader, test
 import argparse
 import numpy as np
-from helpers import orthogonal_complement, plot_pertubation_results
+from utils import orthogonal_complement, plot_pertubation_results, plot_acc_perturb_in_direction_per_eig, plot_loss_perturb_in_direction_per_eig
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from matplotlib import pyplot as plt
 from hessian_eig import hessian_eig
@@ -81,30 +81,11 @@ def perturb_in_direction_per_eig(fname, patterns_per_num, direction, n_eig_dirs=
     pure_pattern_losses = [result[4] for result in loss_results]
 
     # Plotting accuracies
-    plt.clf()
-    plt.figure()
-    plt.plot(eig_indices, op_05_accuracies, 'o', label='Opacity 0.5 Accuracy')
-    plt.plot(eig_indices, pure_num_accuracies, 'o', label='Number Accuracy', color='red')
-    plt.plot(eig_indices, pure_pattern_accuracies, 'o', label='Pattern Accuracy', color='green')
-    plt.xlabel('Eigenvector Index')
-    plt.ylabel('Accuracy')
-    plt.legend()
-    plt.title(f'Loss vs Eig Idx (steering to preserve {direction}, t={t_val:.2f})')
-    plt.grid(True)
-    plt.savefig(f"eigenvector_index_vs_accuracy_{direction}_{t_val}.png")
+    plot_acc_perturb_in_direction_per_eig(eig_indices, op_05_accuracies, pure_num_accuracies, pure_pattern_accuracies, direction, t_val)
 
     # Plotting losses
-    plt.clf()
-    plt.figure()
-    plt.plot(eig_indices, op_05_losses, 'o', label='Opacity 0.5 Loss')
-    plt.plot(eig_indices, pure_num_losses, 'o', label='Number Loss', color='red')
-    plt.plot(eig_indices, pure_pattern_losses, 'o', label='Pattern Loss', color='green')
-    plt.xlabel('Eigenvector Index')
-    plt.ylabel('Loss')
-    plt.legend()
-    plt.title(f'Loss vs Eig Idx (steering to preserve {direction}, t={t_val:.2f})')
-    plt.grid(True)
-    plt.savefig(f"eigenvector_index_vs_loss_{direction}_{t_val}.png")
+    plot_loss_perturb_in_direction_per_eig(eig_indices, op_05_losses, pure_num_losses, pure_pattern_losses, direction, t_val)
+
 
 def get_hessian_eig_mnist(fname, patterns_per_num, opacity=0.5, use_mixed_dataloader=False):
     """
@@ -227,16 +208,16 @@ def perturb_in_direction(fname, patterns_per_num, direction, n_p=50, just_return
         loss_results.append((t_val, op_05_loss, pure_num_loss, pure_pattern_loss))
 
     # write results to textfile
-    with open(f"txt_res/perturbation_results_{direction}_acc.txt", "w") as f:
+    with open(f"perturbation_results_{direction}_acc.txt", "w") as f:
         for result in acc_results:
             f.write(f"{result[0]},{result[1]},{result[2]},{result[3]}\n")
-    with open(f"txt_res/perturbation_results_{direction}_loss.txt", "w") as f:
+    with open(f"perturbation_results_{direction}_loss.txt", "w") as f:
         for result in loss_results:
             f.write(f"{result[0]},{result[1]},{result[2]},{result[3]}\n")
 
     # plot results
-    plot_pertubation_results(acc_results, 'perturbation_acc_results.png', yaxis='Accuracy (%)')
-    plot_pertubation_results(loss_results, 'perturbation_loss_results.png', yaxis='Loss')
+    plot_pertubation_results(acc_results, f'perturbation_acc_results_{direction}.png', yaxis='Accuracy (%)')
+    plot_pertubation_results(loss_results, f'perturbation_loss_results_{direction}.png', yaxis='Loss')
 
 
 def perturb_in_direction_per_eig(fname, patterns_per_num, direction, n_eig_dirs=50, n_orth_dirs=50):
@@ -354,10 +335,10 @@ def save_approx_hessian(fname, n=150, patterns_per_num=10):
     H_pattern = get_hessian(eigenvectors_pattern, eigenvalues_pattern)
     H_05 = get_hessian(eigenvectors_05, eigenvalues_05)
     # Create file to store results
-    with open(f"txt_res/hessian_matrices_results_10patterns.txt", "w") as f:
+    with open(f"hessian_matrices_results_10patterns.txt", "w") as f:
         f.write(f"H_number:\n{H_number}\n\nH_pattern:\n{H_pattern}\n\nH_05:\n{H_05}\n")
 
-def measure_loss_in_valley(fname="models/model_final_finetuned.ckpt", patterns_per_num=10, n=50):
+def measure_loss_in_valley(fname="model_final_finetuned.ckpt", patterns_per_num=10, n=50):
     # Load model
     model = CNN(input_size=28)
     model.load_state_dict(t.load(fname))
@@ -402,7 +383,7 @@ def measure_loss_in_valley(fname="models/model_final_finetuned.ckpt", patterns_p
     print(f"H_pattern proj number: {H_pattern_number}")
     print(f"H_pattern proj pattern: {H_pattern_pattern}")
 
-def test_linear_circuit_decomp(fname="models/model_final_finetuned.ckpt", patterns_per_num=10, n=50, top_vecs = 10):
+def test_linear_circuit_decomp(fname="model_final_finetuned.ckpt", patterns_per_num=10, n=50, top_vecs = 10):
     # Load model
     model = CNN(input_size=28)
     model.load_state_dict(t.load(fname))
@@ -488,10 +469,10 @@ def max_op_loss(fname, patterns_per_num, direction, n_p=50, just_return_proj_v=F
         loss_results.append((t_val, op_05_loss, pure_num_loss, pure_pattern_loss))
 
     # write results to textfile
-    with open(f"txt_res/perturbation_results_{direction}_acc_max_op.txt", "w") as f:
+    with open(f"perturbation_results_{direction}_acc_max_op.txt", "w") as f:
         for result in acc_results:
             f.write(f"{result[0]},{result[1]},{result[2]},{result[3]}\n")
-    with open(f"txt_res/perturbation_results_{direction}_loss_max_op.txt", "w") as f:
+    with open(f"perturbation_results_{direction}_loss_max_op.txt", "w") as f:
         for result in loss_results:
             f.write(f"{result[0]},{result[1]},{result[2]},{result[3]}\n")
 
@@ -502,17 +483,17 @@ def max_op_loss(fname, patterns_per_num, direction, n_p=50, just_return_proj_v=F
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("version", help="version of model to load")
+    parser.add_argument("model_path", help="path to model to load")
     parser.add_argument("--preserve", help="preserve number or pattern performance", type=str, default=None, required=False)
     parser.add_argument("--opacity", help="opacity of patterns in loss data", type=float, default=0.5, required=False)
     parser.add_argument("--patterns_per_num", help="number of patterns per digit", type=int, default=10, required=False)
     parser.add_argument("--mixed", help="use mixed data loader", action="store_true", default=False, required=False)
     args = parser.parse_args()
-    version = args.version
+    model_path = args.model_path
     opacity = args.opacity
     patterns_per_num = args.patterns_per_num
     use_mixed_dataloader = args.mixed
     if args.preserve is not None:
-        perturb_in_direction(f"./models/model_{version}.ckpt", patterns_per_num, args.preserve)
+        perturb_in_direction(model_path, patterns_per_num, args.preserve)
     else:
-        get_hessian_eig_mnist(f"./models/model_{version}.ckpt", patterns_per_num=patterns_per_num, opacity=opacity, use_mixed_dataloader=use_mixed_dataloader)
+        get_hessian_eig_mnist(model_path, patterns_per_num=patterns_per_num, opacity=opacity, use_mixed_dataloader=use_mixed_dataloader)

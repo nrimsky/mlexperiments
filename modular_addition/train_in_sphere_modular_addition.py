@@ -1,7 +1,7 @@
 import torch as t
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
-from helpers import reshape_submodule_param_vector, get_weight_norm
-from modular_addition.mlp_modular_embedding_noising import (
+from utils import reshape_submodule_param_vector, get_weight_norm
+from mlp_modular import (
     MLP,
     test_model,
     get_train_test_loaders,

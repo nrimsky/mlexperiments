@@ -174,11 +174,11 @@ def train(patterns_per_num, opacities, n_epochs=5, initial_lr=0.01, lr_decay=0.7
     for opacity in opacities:
         print(f"Opacity: {opacity}")
         data_loader_train, data_loader_test = load_mnist_data(patterns_per_num, opacity)
-        filename = f"./models/model_{opacity}.ckpt"
+        filename = f"./model_{opacity}.ckpt"
         train_single(data_loader_train, model, criterion, filename, n_epochs, initial_lr, lr_decay, print_pure=print_pure, patterns_per_num=patterns_per_num)
         test(model, data_loader_test)
 
-def train_just_pure_numbers_patterns(patterns_per_num, n_epochs=20, initial_lr=0.01, lr_decay=0.8, print_pure=False, filename = f"./models/model_pure_numbers_patterns.ckpt"):
+def train_just_pure_numbers_patterns(patterns_per_num, n_epochs=20, initial_lr=0.01, lr_decay=0.8, print_pure=False, filename = f"./model_pure_numbers_patterns.ckpt"):
     model = CNN(input_size=28)
     criterion = t.nn.CrossEntropyLoss()
     data_loader_number, data_loader_pattern = load_pure_number_pattern_data(patterns_per_num, is_train=True)
@@ -236,7 +236,7 @@ def make_patterns(just_bw = True, patterns_per_num=20, patterns_filename="./patt
     t.save(patterns, patterns_filename)
     return patterns
 
-def finetune_final_step(patterns_per_num, model_dir = "./models/model_1.0.ckpt", save_dir="./models/model_final_finetuned.ckpt"):
+def finetune_final_step(patterns_per_num, model_dir = "./model_1.0.ckpt", save_dir="./model_final_finetuned.ckpt"):
     # Load final model 
     model = CNN(input_size=28)
     model.load_state_dict(t.load(model_dir))
@@ -273,16 +273,16 @@ def test_pure_and_opacity(model, patterns_per_num, device):
     test(model, data_loader_test, device=device)
 
 def test_all():
-    for fname in glob("./models/*.ckpt"):
+    for fname in glob("./*.ckpt"):
         print(fname)
         test_on_pure_number_patterns(fname)
 
 
-def experiment(make_new_patterns = False):
+def experiment(make_new_patterns = False, patterns_per_num=10):
     if make_new_patterns:
         make_patterns()
     opacities = [0.0, 0.2, 0.4, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0]
-    train(patterns_per_num=10, opacities=opacities)
+    train(patterns_per_num=patterns_per_num, opacities=opacities)
 
 def experiment_vary_complexity(make_new_patterns = False):
     if make_new_patterns:
@@ -303,16 +303,15 @@ def train_direct_opacity_05(patterns_per_num, suffix = "", n_epochs = 20):
     _, data_loader_test = load_mnist_data(patterns_per_num, 0.5)
     model = CNN(input_size=28)
     criterion = t.nn.CrossEntropyLoss()
-    train_single(data_loader_train, model, criterion, f"./models/model_direct_0.5{suffix}.ckpt", n_epochs=n_epochs, initial_lr=0.01, lr_decay=0.8, print_pure=True, patterns_per_num=patterns_per_num)
+    train_single(data_loader_train, model, criterion, f"./model_direct_0.5{suffix}.ckpt", n_epochs=n_epochs, initial_lr=0.01, lr_decay=0.8, print_pure=True, patterns_per_num=patterns_per_num)
     test(model, data_loader_test)
 
 
 if __name__ == "__main__":
-    train_just_pure_numbers_patterns(patterns_per_num=10, n_epochs=15, print_pure=True)
-    finetune_final_step(patterns_per_num=10, model_dir = "./models/model_pure_numbers_patterns.ckpt")
-
+    experiment(patterns_per_num=10)
+    finetune_final_step(patterns_per_num=10)
     model = CNN(input_size=28)
-    model.load_state_dict(t.load('./models/model_final_finetuned.ckpt'))
+    model.load_state_dict(t.load('./model_final_finetuned.ckpt'))
     model.eval()
     model.cuda()
     test_pure_and_opacity(model, 10, device="cuda")

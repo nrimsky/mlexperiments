@@ -52,9 +52,6 @@ def orthogonal_complement(eigenvector_matrix):
     """
     return np.eye(eigenvector_matrix.shape[-1]) - np.matmul(np.transpose(eigenvector_matrix), eigenvector_matrix)
 
-def get_weight_norm(model):
-    return sum((p ** 2).sum() for p in model.parameters() if p.requires_grad)
-
 # Plotting functions
     
 def plot_pertubation_results(results, fname, yaxis):
@@ -152,3 +149,30 @@ def plot_unsupervised_results(results):
     plt.legend()
     plt.grid(True)
     plt.savefig(f'unsupervised_accuracy.png', format='png')
+
+def plot_acc_perturb_in_direction_per_eig(eig_indices, op_05_accuracies, pure_num_accuracies, pure_pattern_accuracies, direction, t_val):
+    # Plotting accuracies
+    plt.clf()
+    plt.figure()
+    plt.plot(eig_indices, op_05_accuracies, 'o', label='Opacity 0.5 Accuracy')
+    plt.plot(eig_indices, pure_num_accuracies, 'o', label='Number Accuracy', color='red')
+    plt.plot(eig_indices, pure_pattern_accuracies, 'o', label='Pattern Accuracy', color='green')
+    plt.xlabel('Eigenvector Index')
+    plt.ylabel('Accuracy')
+    plt.legend()
+    plt.title(f'Loss vs Eig Idx (steering to preserve {direction}, t={t_val:.2f})')
+    plt.grid(True)
+    plt.savefig(f"eigenvector_index_vs_accuracy_{direction}_{t_val}.png")
+
+def plot_loss_perturb_in_direction_per_eig(eig_indices, op_05_losses, pure_num_losses, pure_pattern_losses, direction, t_val):
+    plt.clf()
+    plt.figure()
+    plt.plot(eig_indices, op_05_losses, 'o', label='Opacity 0.5 Loss')
+    plt.plot(eig_indices, pure_num_losses, 'o', label='Number Loss', color='red')
+    plt.plot(eig_indices, pure_pattern_losses, 'o', label='Pattern Loss', color='green')
+    plt.xlabel('Eigenvector Index')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.title(f'Loss vs Eig Idx (steering to preserve {direction}, t={t_val:.2f})')
+    plt.grid(True)
+    plt.savefig(f"eigenvector_index_vs_loss_{direction}_{t_val}.png")

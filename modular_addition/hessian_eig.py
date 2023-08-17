@@ -2,7 +2,7 @@ import torch as t
 from torch.autograd import grad
 from scipy.sparse.linalg import LinearOperator, eigsh
 import numpy as np
-from helpers import get_weight_norm
+from utils import get_weight_norm
 
 def hessian_eig_modular_addition(
     model,

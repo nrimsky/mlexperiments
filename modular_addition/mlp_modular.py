@@ -3,11 +3,12 @@ import torch.nn as nn
 import torch.utils.data as data
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
-from modular_addition.generate_movie import plot_embeddings_movie, run_movie_cmd
-from random import randint
+from generate_movie import plot_embeddings_movie
+from itertools import combinations
+from utils import get_weight_norm
 
-def get_module_parameters(model):
-    return model.fc.parameters()
+def all_subsets(s):
+    return [set(comb) for i in range(len(s) + 1) for comb in combinations(s, i)]
 
 
 class ModuloAdditionDataset(data.Dataset):
@@ -31,7 +32,8 @@ def count_parameters(model):
 
 def make_circle_embeddings(embed_dim, vocab_size):
     n_blocks = embed_dim // 2
-    k_values = [randint(1, vocab_size -1) for _ in range(n_blocks)]
+    # k_values = [randint(1, vocab_size -1) for _ in range(n_blocks)]
+    k_values = [3, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47][:n_blocks]
     print("Using K values", k_values)
     arange_tensor = t.arange(vocab_size - 1).float()
     div_tensor = 2 * t.pi * arange_tensor / (vocab_size - 1)
@@ -44,25 +46,20 @@ def make_circle_embeddings(embed_dim, vocab_size):
         ], dim=1)
         for k in k_values
     ]
-    embeddings = t.cat(M_k_list, dim=1)
-    embeddings *= 0.7
-    return embeddings
-
-def make_random_embeddings(embed_dim, vocab_size):
-    return t.randn(vocab_size, embed_dim)
+    return t.cat(M_k_list, dim=1)
     
 class MLP(nn.Module):
-    def __init__(self, embed_dim, vocab_size, hidden_dim):
+    def __init__(self, embed_dim, vocab_size, hidden_dim, freeze_embed=False):
         super().__init__()
         self.n_blocks = embed_dim // 2
-        self.embedding = nn.Parameter()
-        self.embedding = nn.Parameter(make_circle_embeddings(embed_dim, vocab_size))
+        self.embedding = nn.Parameter(make_circle_embeddings(embed_dim, vocab_size))  # size vocab size x embed_dim
+        if freeze_embed:
+            self.embedding.requires_grad = False
+        # self.embedding = nn.Parameter(t.randn(vocab_size, embed_dim))
         self.linear1_weights = nn.Parameter(t.randn(self.n_blocks, 2, hidden_dim))
         self.linear2_weights = nn.Parameter(t.randn(self.n_blocks, hidden_dim, 2))
         self.linear3 = nn.Linear(embed_dim, vocab_size, bias=False)
         self.silu = nn.SiLU()
-        self.embedding.requires_grad = False
-
 
     def forward(self, x1, x2):
         x1 = self.embedding[x1].view(-1, self.n_blocks, 2)
@@ -72,15 +69,45 @@ class MLP(nn.Module):
         x2 = t.einsum('bnj,njk->bnk', x2, self.linear1_weights)
     
         x = x1 + x2
-        # x = x ** 2
         x = self.silu(x)
         x = t.einsum('bnk,nkj->bnj', x, self.linear2_weights)
         # Flatten the tensor from shape (batch_size, n_blocks, 2) to (batch_size, n_blocks*2) = (batch_size, embed_dim)
         x = x.reshape(x.size(0), -1)
         return self.linear3(x)
+    
+def add_embedding_noise(model, circuit_nums, device="cpu"):
+    embedding_weights = model.embedding.detach().clone().cpu()
+    norm_param = embedding_weights[:, :2].norm(p=2).cpu()*5
+    vec = t.zeros(embedding_weights.shape[1])
+    for i in range(embedding_weights.shape[1]//2):
+        if i in circuit_nums:
+            vec[2*i] = 1
+            vec[2*i + 1] = 1
+    vec = t.randn_like(embedding_weights) * vec.unsqueeze(0)
+    vec = vec / t.norm(vec, p=2)
+    vec *= norm_param
+    embedding_weights += vec
+    # set model embedding to new embedding
+    model.embedding = nn.Parameter(embedding_weights.to(device))
+    return model
 
+def add_embedding_noise_2(model, circuit_nums, frac=0.5, device="cpu"):
+    embedding_weights = model.embedding.detach().clone().cpu()
+    mask = t.zeros(embedding_weights.shape[1])
+    p = frac / len(circuit_nums)
+    for i in range(embedding_weights.shape[1]//2):
+        if i in circuit_nums:
+            mask[2*i] = 1
+            mask[2*i + 1] = 1
+    mask = t.ones_like(embedding_weights) * mask.unsqueeze(0)
+    inv_mask = t.ones_like(embedding_weights) * (1 - mask.unsqueeze(0))
+    rand_mask = t.rand_like(embedding_weights) > p
+    full_mask = mask * rand_mask + inv_mask
+    embedding_weights = (embedding_weights * full_mask).float()[0]
+    model.embedding = nn.Parameter(embedding_weights.to(device))
+    return model
 
-def plot_embeddings_chunks(model):
+def plot_embeddings_chunks(model, filename="embeddings_chunks.png"):
     plt.clf()
     embeddings = model.embedding.detach().cpu() # vocab_size x embed_dim
     chunked = t.chunk(embeddings, embeddings.shape[-1]//2, dim = -1)
@@ -100,8 +127,14 @@ def plot_embeddings_chunks(model):
         words = [str(i) for i in range(embeddings.shape[0])]
         for j, word in enumerate(words):
             axs[i].annotate(word, xy=(chunk[j, 0], chunk[j, 1]))
-    plt.tight_layout()  # adjust spacing between subplots
-    plt.savefig("embeddings_chunks.png")
+
+    for ax in axs:
+        bound = max([abs(x) for x in ax.get_xlim()] + [abs(y) for y in ax.get_ylim()])
+        ax.set_xlim([-bound, bound])
+        ax.set_ylim([-bound, bound])
+
+    plt.tight_layout()
+    plt.savefig(filename)
 
 
 def plot_embeddings(model, vocab_size):
@@ -126,49 +159,41 @@ def get_train_test_loaders(train_frac, batch_size, vocab_size):
     test_loader = data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     return train_loader, test_loader
 
-def get_weight_norm(model):
-    return sum(t.norm(p, p=2) for p in model.parameters() if p.requires_grad)
-
-def train(vocab_size = 114, train_frac = 0.3, hidden_dim = 32, embed_dim = 16, save_frames = True, epochs = 30000):
-    model = MLP(vocab_size=vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim)
+def train(train_loader, test_loader, vocab_size = 114, hidden_dim = 32, embed_dim = 16, save_frames = True, reg=0.005):
+    model = MLP(vocab_size=vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim, freeze_embed=True)
     print(f"Number of parameters: {count_parameters(model)}")
-    batch_size = 256
-    train_loader, test_loader = get_train_test_loaders(train_frac, batch_size, vocab_size)
-    optimizer = t.optim.SGD(model.parameters(), lr=0.02)
+    optimizer = t.optim.AdamW(model.parameters(), lr=0.02, weight_decay=0.0)
+    scheduler = t.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9997)
     criterion = nn.CrossEntropyLoss()
-    # epochs = 10000
+    epochs = 5000
     device = t.device("cuda" if t.cuda.is_available() else "cpu")
     model.to(device)
     old_acc = 0
     step = 0
     for epoch in range(epochs):
-        if epoch == epochs//2:
-            model.embedding.requires_grad = True
-            optimizer = t.optim.SGD(model.parameters(), lr=0.005)
         model.train()
         train_loss = 0
-        reg_loss = 0
         for x1, x2, target in train_loader:
             x1, x2, target = x1.to(device), x2.to(device), target.to(device)
             optimizer.zero_grad()
             output = model(x1, x2)
-            reg = get_weight_norm(model) * 0.02
-            loss = criterion(output, target) + reg
+            loss = criterion(output, target) + reg * get_weight_norm(model)
             train_loss += loss.item()
-            reg_loss += reg.item()
             loss.backward()
             optimizer.step()
         model.eval()
         if save_frames:
-            if epoch % 500 == 0: 
+            if epoch % 1000 == 0: 
                 with t.no_grad():
                     step += 1
                     plot_embeddings_movie(model, step)
         if epoch % 200 == 0:
             val_loss, val_acc = test_model(model, test_loader, device, criterion)
-            print(f"Epoch {epoch}: train loss {train_loss}; reg loss {reg_loss}; test loss {val_loss}; test acc {val_acc}; old acc {old_acc}")
+            print(f"Epoch {epoch}: train loss {train_loss}; test loss {val_loss}; test acc {val_acc}; old acc {old_acc}")
             old_acc = val_acc
+        scheduler.step()
     t.save(model.state_dict(), "modular_addition.ckpt")
+    return model
 
 
 def test_model(model, test_loader, device, criterion):
@@ -185,12 +210,33 @@ def test_model(model, test_loader, device, criterion):
         val_loss = val_loss / len(test_loader)
     return val_loss, val_acc
 
+def experiment(model, test_loader, frac=0.5):
+    device = t.device("cuda" if t.cuda.is_available() else "cpu")
+    model = model.to(device)
+    orig_embedding  = model.embedding.detach().clone()
+    model.eval()
+    val_loss, val_acc = test_model(model, test_loader, device, nn.CrossEntropyLoss())
+    print(f"Original: loss: {float(val_loss)}, accuracy: {float(val_acc)}")
+    for subset in all_subsets(list(range(model.embedding.shape[-1]//2))):
+        if len(subset) == 0:
+            continue
+        model = add_embedding_noise_2(model, subset, frac=frac, device=device)
+        val_loss, val_acc = test_model(model, test_loader, device, nn.CrossEntropyLoss())
+        print(f"Embedding noise only on circuits ({subset}): loss: {float(val_loss)}, accuracy: {float(val_acc)}")
+        model.embedding = t.nn.Parameter(orig_embedding.to(device))
 
 if __name__ == "__main__":
-    train(vocab_size = 38, train_frac = 0.8, embed_dim = 6, hidden_dim = 8, save_frames = True, epochs = 40000)
-    model = MLP(vocab_size=38, embed_dim=12, hidden_dim=8)
+    train_frac = 0.7
+    batch_size = 256
+    vocab_size = 38
+    embed_dim = 8
+    hidden_dim = 8
+    train_loader, test_loader = get_train_test_loaders(train_frac, batch_size, vocab_size)
+    train(train_loader, test_loader, vocab_size = vocab_size, embed_dim = embed_dim, hidden_dim = hidden_dim, save_frames = False)
+    # run_movie_cmd()
+    model = MLP(vocab_size=vocab_size, embed_dim=embed_dim, hidden_dim = hidden_dim)
     model.load_state_dict(t.load("modular_addition.ckpt"))
     model.eval()
-    plot_embeddings(model, 38)
+    plot_embeddings(model, vocab_size)
     plot_embeddings_chunks(model)
-    run_movie_cmd()
+    experiment(model, test_loader, frac=0.5)

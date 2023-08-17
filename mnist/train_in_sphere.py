@@ -1,10 +1,9 @@
 import torch as t
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
-from mnist.train_mnist import CNN, load_mnist_data, test_pure_and_opacity, load_pure_number_pattern_data, test
-from mnist.hessian_eigenvector_projection import get_hessian_eigenvalues
+from train_mnist import CNN, load_mnist_data, test_pure_and_opacity, load_pure_number_pattern_data, test
+from hessian_eig import hessian_eig
 from tqdm import tqdm
-from helpers import reshape_submodule_param_vector, plot_semi_supervised_results, plot_unsupervised_results
-import numpy as np
+from utils import reshape_submodule_param_vector, plot_semi_supervised_results, plot_unsupervised_results
 
 def get_module_parameters(model):
     return model.parameters()
@@ -89,7 +88,7 @@ def test_eigen_model(model, dataset1, dataset2, n_top_vectors=5, n_batches=10, d
     activations2 = model.get_all_internal_states()
 
 
-    _, eigenvalues, eigenvectors = get_hessian_eigenvalues(model, t.nn.CrossEntropyLoss(), dataset1, device=device, n_top_vectors=n_top_vectors, param_extract_fn=get_module_parameters, num_batches=n_batches)
+    _, eigenvalues, eigenvectors = hessian_eig(model, t.nn.CrossEntropyLoss(), dataset1, device=device, n_top_vectors=n_top_vectors, param_extract_fn=get_module_parameters, num_batches=n_batches)
     eigenvectors = t.tensor(eigenvectors).to(device)
 
     # Flatten model parameters
@@ -147,10 +146,6 @@ def train_in_sphere(model, dataloader, top_eigenvectors, radius = 1, lambda_sphe
     unit_sphere_vec /= t.norm(unit_sphere_vec)
     point_on_sphere = offset.to(device) + radius*unit_sphere_vec.to(device)
 
-    # v = t.load('proj_v_pattern.pt')
-    # v = (v/t.norm(v, p=2)).float()
-    # point_on_sphere = offset.to(device) + radius*v.to(device)
-
     # load the point on the sphere into the model
     vector_to_parameters(point_on_sphere, model.parameters())
     model.train()
@@ -190,19 +185,19 @@ def train_in_sphere(model, dataloader, top_eigenvectors, radius = 1, lambda_sphe
 
 def unsupervised():
     model = CNN(input_size=28)
-    model.load_state_dict(t.load("models/model_final_finetuned.ckpt"))
+    model.load_state_dict(t.load("model_final_finetuned.ckpt"))
     model.to(device="cuda")
     model.eval()
     loss_fn = t.nn.CrossEntropyLoss()
     radii = [0.5, 1, 1.5, 2, 2.5, 3]
     data_loader_test_number, data_loader_test_pattern = load_pure_number_pattern_data(patterns_per_num=10, is_train=False)
     data_loader_train, data_loader_test = load_mnist_data(patterns_per_num=10, opacity=0.5)
-    _, _, eigenvectors = get_hessian_eigenvalues(model, loss_fn, data_loader_train, device="cuda", n_top_vectors=35, param_extract_fn=get_module_parameters)
+    _, _, eigenvectors = hessian_eig(model, loss_fn, data_loader_train, device="cuda", n_top_vectors=35, param_extract_fn=get_module_parameters)
     results = []
     with open('results_unsupervised.txt', 'w') as f:
         for radius in radii:
             model = CNN(input_size=28)
-            model.load_state_dict(t.load("models/model_final_finetuned.ckpt"))
+            model.load_state_dict(t.load("model_final_finetuned.ckpt"))
             model.to(device="cuda")
             model.eval()
             train_in_sphere(model, data_loader_train, eigenvectors, radius=radius, lambda_sphere=15, lambda_orth=1, lr=0.005, n_epochs=10, device="cuda", patterns_per_num=10)
@@ -225,7 +220,7 @@ def semi_supervised(sphere):
     TODO: reduce radius range for `number` sphere as it's more sensitive to radius -> contributes lower eigenvalues??
     """
     model = CNN(input_size=28)
-    model.load_state_dict(t.load("models/model_final_finetuned.ckpt"))
+    model.load_state_dict(t.load("model_final_finetuned.ckpt"))
     model.to(device="cuda")
     model.eval()
     loss_fn = t.nn.CrossEntropyLoss()
@@ -238,13 +233,13 @@ def semi_supervised(sphere):
         eigen_loader = data_loader_test_pattern
     else:
         raise ValueError("sphere must be 'number' or 'pattern'")
-    _, _, eigenvectors = get_hessian_eigenvalues(model, loss_fn, eigen_loader, device="cuda", n_top_vectors=35, param_extract_fn=get_module_parameters)
+    _, _, eigenvectors = hessian_eig(model, loss_fn, eigen_loader, device="cuda", n_top_vectors=35, param_extract_fn=get_module_parameters)
     data_loader_train, data_loader_test = load_mnist_data(patterns_per_num=10, opacity=0.5)
     results = []
     with open(f'results_{sphere}.txt', 'w') as f:
         for radius in radii:
             model = CNN(input_size=28)
-            model.load_state_dict(t.load("models/model_final_finetuned.ckpt"))
+            model.load_state_dict(t.load("model_final_finetuned.ckpt"))
             model.to(device="cuda")
             model.eval()
             train_in_sphere(model, data_loader_train, eigenvectors, radius=radius, lambda_sphere=15, lambda_orth=1, lr=0.005, n_epochs=10, device="cuda", patterns_per_num=10)
@@ -262,7 +257,7 @@ def semi_supervised(sphere):
 
 def activation_similarity_eigenmodel():
     model = CNN(input_size=28)
-    model.load_state_dict(t.load("models/model_final_finetuned.ckpt"))
+    model.load_state_dict(t.load("model_final_finetuned.ckpt"))
     model.to(device="cuda")
     model.eval()
     data_loader_test_number, data_loader_test_pattern = load_pure_number_pattern_data(patterns_per_num=10, is_train=False)

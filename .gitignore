@@ -3,6 +3,10 @@ data
 *.ckpt
 venv
 .vscode
-models/
+
 *.pt
 frames
+mnist/models 
+modular_addition/models
+modular_addition/frames
+modular_addition/movies
