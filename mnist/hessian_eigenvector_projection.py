@@ -42,6 +42,12 @@ def perturb_in_direction_per_eig(fname, patterns_per_num, direction, n_eig_dirs=
         v_dirs = eigenvectors_pattern[-n_eig_dirs:] # 3340
     elif direction == 'pattern':
         v_dirs = eigenvectors_number[-n_eig_dirs:] # 3340
+
+    # Save eigenvectors for future reference
+    all_eigs_num = t.cat([t.tensor(e) for e in eigenvectors_number], dim=0)
+    t.save(all_eigs_num, f"eigenvectors_number.pt")
+    all_eigs_pat = t.cat([t.tensor(e) for e in eigenvectors_pattern], dim=0)
+    t.save(all_eigs_pat, f"eigenvectors_pattern.pt")
     
     # get opacity 0.5 dataloader
     _, data_loader_05_test = load_mnist_data(patterns_per_num, opacity=0.5)
@@ -218,88 +224,6 @@ def perturb_in_direction(fname, patterns_per_num, direction, n_p=50, just_return
     # plot results
     plot_pertubation_results(acc_results, f'perturbation_acc_results_{direction}.png', yaxis='Accuracy (%)')
     plot_pertubation_results(loss_results, f'perturbation_loss_results_{direction}.png', yaxis='Loss')
-
-
-def perturb_in_direction_per_eig(fname, patterns_per_num, direction, n_eig_dirs=50, n_orth_dirs=50):
-    """
-    fname: checkpoint file name
-    patterns_per_num: number of patterns per digit
-    direction: direction to perturb in ('pattern' or 'number')
-    n_eig_dirs: number of vectors to use for projection to high eigenvector manifold
-    n_orth_dirs: number of vectors to use for producing orthogonal complement as generalization direction
-    """
-    # Load model 
-    model = CNN(input_size=28)
-    model.load_state_dict(t.load(fname))
-    model.to(device="cuda")
-    model.eval()
-    loss_fn = t.nn.CrossEntropyLoss()
-    # Load pure pattern number data
-    data_loader_test_number, data_loader_test_pattern = load_pure_number_pattern_data(patterns_per_num, is_train=False)
-
-    if direction == 'number':
-        _, _, eigenvectors_number = hessian_eig(model, loss_fn, data_loader_test_number, num_batches=50, device="cuda", n_top_vectors=n_orth_dirs)
-        _, _, eigenvectors_pattern = hessian_eig(model, loss_fn, data_loader_test_pattern, num_batches=50, device="cuda", n_top_vectors=n_eig_dirs)
-    elif direction == 'pattern':
-        _, _, eigenvectors_number = hessian_eig(model, loss_fn, data_loader_test_number, num_batches=50, device="cuda", n_top_vectors=n_eig_dirs)
-        _, _, eigenvectors_pattern = hessian_eig(model, loss_fn, data_loader_test_pattern, num_batches=50, device="cuda", n_top_vectors=n_orth_dirs)
-
-    # Save eigenvectors for future reference
-    all_eigs_num = t.cat([t.tensor(e) for e in eigenvectors_number], dim=0)
-    t.save(all_eigs_num, f"eigenvectors_number.pt")
-    all_eigs_pat = t.cat([t.tensor(e) for e in eigenvectors_pattern], dim=0)
-    t.save(all_eigs_pat, f"eigenvectors_pattern.pt")
-
-    if direction == 'number':
-        orth = orthogonal_complement(eigenvectors_number) # 3340 x 3340
-    elif direction == 'pattern':
-        orth = orthogonal_complement(eigenvectors_pattern) # 3340 # 3340
-
-    
-    if direction == 'number':
-        v_dirs = eigenvectors_pattern[-n_eig_dirs:] # 3340
-    elif direction == 'pattern':
-        v_dirs = eigenvectors_number[-n_eig_dirs:] # 3340
-    
-    # get opacity 0.5 dataloader
-    _, data_loader_05_test = load_mnist_data(patterns_per_num, opacity=0.5)
-    t_values = np.linspace(0, 0.5, 50)
-    for idx, v in enumerate(v_dirs):
-        proj_v = np.matmul(orth, v) # 3340
-        # store results 
-        acc_results = []
-        loss_results = []
-        for t_val in t_values:
-            # load model 
-            model = CNN(input_size=28)
-            model.load_state_dict(t.load(fname))
-            model.eval()
-            model.to(device="cuda")
-            # perturb parameters by t * proj_v
-            params_vector = parameters_to_vector(model.parameters()).detach()
-            pertubation = t.tensor(t_val * proj_v, dtype=t.float32).to(device="cuda")
-            params_vector = params_vector + pertubation
-            vector_to_parameters(params_vector, model.parameters())
-            # evaluating model 
-            op_05_accuracy, op_05_loss = test(model, data_loader_05_test, do_print=False, device="cuda", calc_loss=True, max_batches=100)
-            pure_num_acc, pure_num_loss = test(model, data_loader_test_number, do_print=False, device="cuda", calc_loss=True, max_batches=100)
-            pure_pattern_acc, pure_pattern_loss = test(model, data_loader_test_pattern, do_print=False, device="cuda", calc_loss=True, max_batches=100)
-            # print results
-            print(f"EIG {idx} | t_val: {t_val:.2f}, direction: {direction}, op_05_acc: {op_05_accuracy:.6f}, pure_num_acc: {pure_num_acc:.6f}, pure_pattern_acc: {pure_pattern_acc:.6f}, op_05_loss: {op_05_loss:.6f}, pure_num_loss: {pure_num_loss:.6f}, pure_pattern_loss: {pure_pattern_loss:.6f}")
-            # store results
-            acc_results.append((t_val, op_05_accuracy, pure_num_acc, pure_pattern_acc))
-            loss_results.append((t_val, op_05_loss, pure_num_loss, pure_pattern_loss))
-        # write results to textfile
-        with open(f"txt_res/perturbation_results_{direction}_acc_eig_{idx}.txt", "w") as f:
-            for result in acc_results:
-                f.write(f"{result[0]},{result[1]},{result[2]},{result[3]}\n")
-        with open(f"txt_res/perturbation_results_{direction}_loss_eig_{idx}.txt", "w") as f:
-            for result in loss_results:
-                f.write(f"{result[0]},{result[1]},{result[2]},{result[3]}\n")
-        # plot results
-        plot_pertubation_results(acc_results, f'perturbation_acc_results_{direction}_eig_{idx}.png', yaxis='Accuracy (%)')
-        plot_pertubation_results(loss_results, f'perturbation_loss_results_{direction}_eig_{idx}.png.png', yaxis='Loss')
-
 
 def get_hessian(eigenvectors, eigenvalues):
     eigenvectors = np.array(eigenvectors)
