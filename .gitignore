@@ -12,3 +12,4 @@ modular_addition/frames
 modular_addition/movies
 results_*.txt
 *.pth
+modular_addition/embeddings_chunks*

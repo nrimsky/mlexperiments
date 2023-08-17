@@ -49,10 +49,13 @@ def make_circle_embeddings(embed_dim, vocab_size):
     return t.cat(M_k_list, dim=1)
     
 class MLP(nn.Module):
-    def __init__(self, embed_dim, vocab_size, hidden_dim, freeze_embed=False):
+    def __init__(self, embed_dim, vocab_size, hidden_dim, freeze_embed=False, use_circular_embeddings=False):
         super().__init__()
         self.n_blocks = embed_dim // 2
-        self.embedding = nn.Parameter(make_circle_embeddings(embed_dim, vocab_size))  # size vocab size x embed_dim
+        if use_circular_embeddings:
+            self.embedding = nn.Parameter(make_circle_embeddings(embed_dim, vocab_size))
+        else:
+            self.embedding = nn.Parameter(t.randn(vocab_size, embed_dim))
         if freeze_embed:
             self.embedding.requires_grad = False
         # self.embedding = nn.Parameter(t.randn(vocab_size, embed_dim))
@@ -159,8 +162,8 @@ def get_train_test_loaders(train_frac, batch_size, vocab_size):
     test_loader = data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     return train_loader, test_loader
 
-def train(train_loader, test_loader, vocab_size = 114, hidden_dim = 32, embed_dim = 16, save_frames = True, reg=0.005):
-    model = MLP(vocab_size=vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim, freeze_embed=True)
+def train(train_loader, test_loader, vocab_size = 114, hidden_dim = 32, embed_dim = 16, save_frames = True, reg=0.005, use_circular_embeddings=False):
+    model = MLP(vocab_size=vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim, freeze_embed=True, use_circular_embeddings=use_circular_embeddings)
     print(f"Number of parameters: {count_parameters(model)}")
     optimizer = t.optim.AdamW(model.parameters(), lr=0.02, weight_decay=0.0)
     scheduler = t.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9997)
@@ -232,7 +235,7 @@ if __name__ == "__main__":
     embed_dim = 8
     hidden_dim = 8
     train_loader, test_loader = get_train_test_loaders(train_frac, batch_size, vocab_size)
-    train(train_loader, test_loader, vocab_size = vocab_size, embed_dim = embed_dim, hidden_dim = hidden_dim, save_frames = False)
+    train(train_loader, test_loader, vocab_size = vocab_size, embed_dim = embed_dim, hidden_dim = hidden_dim, save_frames = False, use_circular_embeddings=True)
     # run_movie_cmd()
     model = MLP(vocab_size=vocab_size, embed_dim=embed_dim, hidden_dim = hidden_dim)
     model.load_state_dict(t.load("modular_addition.ckpt"))
