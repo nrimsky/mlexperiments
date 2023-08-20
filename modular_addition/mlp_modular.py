@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.utils.data as data
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
-from generate_movie import plot_embeddings_movie
+from generate_movie import plot_embeddings_movie, run_movie_cmd
 from itertools import combinations
 from utils import get_weight_norm
 
@@ -162,16 +162,15 @@ def get_train_test_loaders(train_frac, batch_size, vocab_size):
     test_loader = data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     return train_loader, test_loader
 
-def train(train_loader, test_loader, vocab_size = 114, hidden_dim = 32, embed_dim = 16, save_frames = True, reg=0.005, use_circular_embeddings=False):
-    model = MLP(vocab_size=vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim, freeze_embed=True, use_circular_embeddings=use_circular_embeddings)
+def train(train_loader, test_loader, vocab_size = 114, hidden_dim = 32, embed_dim = 16, save_frames = True, reg=0.005, use_circular_embeddings=False, freeze_embed=False):
+    model = MLP(vocab_size=vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim, freeze_embed=freeze_embed, use_circular_embeddings=use_circular_embeddings)
     print(f"Number of parameters: {count_parameters(model)}")
-    optimizer = t.optim.AdamW(model.parameters(), lr=0.02, weight_decay=0.0)
-    scheduler = t.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9997)
+    optimizer = t.optim.AdamW(model.parameters(), lr=0.01, weight_decay=0.0)
+    scheduler = t.optim.lr_scheduler.ExponentialLR(optimizer, gamma=1)
     criterion = nn.CrossEntropyLoss()
-    epochs = 5000
+    epochs = 50000
     device = t.device("cuda" if t.cuda.is_available() else "cpu")
     model.to(device)
-    old_acc = 0
     step = 0
     for epoch in range(epochs):
         model.train()
@@ -186,14 +185,14 @@ def train(train_loader, test_loader, vocab_size = 114, hidden_dim = 32, embed_di
             optimizer.step()
         model.eval()
         if save_frames:
-            if epoch % 1000 == 0: 
+            if epoch % 500 == 0: 
                 with t.no_grad():
                     step += 1
                     plot_embeddings_movie(model, step)
         if epoch % 200 == 0:
             val_loss, val_acc = test_model(model, test_loader, device, criterion)
-            print(f"Epoch {epoch}: train loss {train_loss}; test loss {val_loss}; test acc {val_acc}; old acc {old_acc}")
-            old_acc = val_acc
+            train_loss, train_acc = test_model(model, train_loader, device, criterion)
+            print(f"Epoch {epoch}: train loss: {float(train_loss)}, train accuracy: {float(train_acc)}, val loss: {float(val_loss)}, val accuracy: {float(val_acc)}")
         scheduler.step()
     t.save(model.state_dict(), "modular_addition.ckpt")
     return model
@@ -229,17 +228,17 @@ def experiment(model, test_loader, frac=0.5):
         model.embedding = t.nn.Parameter(orig_embedding.to(device))
 
 if __name__ == "__main__":
-    train_frac = 0.7
+    train_frac = 0.5
     batch_size = 256
-    vocab_size = 38
-    embed_dim = 8
-    hidden_dim = 8
+    vocab_size = 114
+    embed_dim = 14
+    hidden_dim = 12
     train_loader, test_loader = get_train_test_loaders(train_frac, batch_size, vocab_size)
-    train(train_loader, test_loader, vocab_size = vocab_size, embed_dim = embed_dim, hidden_dim = hidden_dim, save_frames = False, use_circular_embeddings=True)
-    # run_movie_cmd()
+    train(train_loader, test_loader, vocab_size = vocab_size, embed_dim = embed_dim, hidden_dim = hidden_dim, save_frames = True, use_circular_embeddings=False, reg=0.002, freeze_embed=False)
+    run_movie_cmd()
     model = MLP(vocab_size=vocab_size, embed_dim=embed_dim, hidden_dim = hidden_dim)
     model.load_state_dict(t.load("modular_addition.ckpt"))
     model.eval()
     plot_embeddings(model, vocab_size)
     plot_embeddings_chunks(model)
-    experiment(model, test_loader, frac=0.5)
+    # experiment(model, test_loader, frac=0.5)

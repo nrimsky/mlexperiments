@@ -13,3 +13,4 @@ modular_addition/movies
 results_*.txt
 *.pth
 modular_addition/embeddings_chunks*
+modular_addition/embeddings.png
