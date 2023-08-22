@@ -6,7 +6,7 @@ from utils import orthogonal_complement, plot_pertubation_results, plot_acc_pert
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from matplotlib import pyplot as plt
 from hessian_eig import hessian_eig
-from visualize_conv_kernels import make_conv_movies, save_frames_weights
+from visualize_conv_kernels import save_frames, make_conv_movies
 
 
 def perturb_in_direction_per_eig(fname, patterns_per_num, direction, n_eig_dirs=50, n_orth_dirs=50):
@@ -215,7 +215,7 @@ def perturb_in_direction(fname, patterns_per_num, direction, n_p=50, just_return
         loss_results.append((t_val, op_05_loss, pure_num_loss, pure_pattern_loss))
 
         if make_movie:
-            save_frames_weights(idx, model)
+            save_frames(idx, model, data_loader_05_test)
 
     # write results to textfile
     with open(f"perturbation_results_{direction}_acc.txt", "w") as f:
