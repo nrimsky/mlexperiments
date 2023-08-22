@@ -4,6 +4,7 @@ from random import randint
 from torch.utils.data import Dataset, DataLoader
 from glob import glob
 import numpy as np
+from visualize_conv_kernels import save_frames_weights, make_conv_movies, save_frames
 
 
 class CombinedDataLoader:
@@ -129,6 +130,11 @@ class CNN(t.nn.Module):
         self.conv_1_act = None
         self.conv_2_act = None
 
+        t.nn.init.zeros_(self.fc1.weight)
+        t.nn.init.zeros_(self.fc2.weight)
+        t.nn.init.zeros_(self.conv1[0].weight)
+        t.nn.init.zeros_(self.conv2[0].weight)
+
     def forward(self, x):
         x = self.conv1(x)
         self.conv_1_act = x
@@ -148,17 +154,24 @@ class CNN(t.nn.Module):
         return self.fc_1_act.flatten().detach().cpu().numpy()
 
 
-def train_single(data_loader_train, model, criterion, filename, n_epochs, initial_lr, lr_decay, patterns_per_num, print_pure=False):
-    optimizer = t.optim.SGD(model.parameters(), lr=initial_lr, weight_decay=0, momentum=0, dampening=0, nesterov=False)
+def train_single(data_loader_train, model, criterion, filename, n_epochs, initial_lr, lr_decay, patterns_per_num, print_pure=False, make_movie=False):
+    optimizer = t.optim.Adam(model.parameters(), lr=initial_lr, weight_decay=0)
     scheduler = t.optim.lr_scheduler.ExponentialLR(optimizer, gamma=lr_decay)
+    n = 0
     for epoch in range(n_epochs):
         for i, (images, labels) in enumerate(data_loader_train):
+            if i % 100 == 0 and make_movie:
+                n += 1
+                model.eval()
+                # save_frames_weights(n, model)
+                save_frames(n, model, data_loader_train)
+            model.train()
             optimizer.zero_grad()
             outputs = model(images)
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
-            if (i+1) % 100 == 0:
+            if (i+1) % 20 == 0:
                 print("Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}".format(epoch+1, n_epochs, i+1, len(data_loader_train), loss.item()))
         # Decay the learning rate at the end of the epoch.
         scheduler.step()
@@ -166,6 +179,7 @@ def train_single(data_loader_train, model, criterion, filename, n_epochs, initia
         if print_pure:
             test_on_pure_number_patterns(filename, patterns_per_num)
     t.save(model.state_dict(), filename)
+    make_conv_movies()
 
 
 def train(patterns_per_num, opacities, n_epochs=5, initial_lr=0.01, lr_decay=0.7, print_pure=False):
@@ -308,10 +322,18 @@ def train_direct_opacity_05(patterns_per_num, suffix = "", n_epochs = 20):
 
 
 if __name__ == "__main__":
-    experiment(patterns_per_num=10)
-    finetune_final_step(patterns_per_num=10)
+    # experiment(patterns_per_num=10)
+    # finetune_final_step(patterns_per_num=10)
+    # model = CNN(input_size=28)
+    # model.load_state_dict(t.load('./model_final_finetuned.ckpt'))
+    # model.eval()
+    # model.cuda()
+    # test_pure_and_opacity(model, 10, device="cuda")
+    data_train = CustomMNIST(10, 0.0, is_train=True, proportion_just_pattern=0.0, proportion_unchanged=0.0)
+    data_loader_train = DataLoader(dataset=data_train,
+                                                batch_size=64,
+                                                shuffle=True)
     model = CNN(input_size=28)
-    model.load_state_dict(t.load('./model_final_finetuned.ckpt'))
-    model.eval()
-    model.cuda()
-    test_pure_and_opacity(model, 10, device="cuda")
+    criterion = t.nn.CrossEntropyLoss()
+    model.train()
+    train_single(data_loader_train, model, criterion, f"./model_new.ckpt", n_epochs=3, initial_lr=0.01, lr_decay=0.95, print_pure=True, patterns_per_num=10, make_movie=True)

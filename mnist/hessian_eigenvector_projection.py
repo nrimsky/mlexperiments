@@ -6,7 +6,7 @@ from utils import orthogonal_complement, plot_pertubation_results, plot_acc_pert
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from matplotlib import pyplot as plt
 from hessian_eig import hessian_eig
-from visualize_conv_kernels import save_frames, make_conv_movies
+from visualize_conv_kernels import save_frames_weights, make_conv_movies
 
 
 def perturb_in_direction_per_eig(fname, patterns_per_num, direction, n_eig_dirs=50, n_orth_dirs=50):
@@ -188,7 +188,7 @@ def perturb_in_direction(fname, patterns_per_num, direction, n_p=50, just_return
     _, data_loader_05_test = load_mnist_data(patterns_per_num, opacity=0.5)
 
 
-    t_values = np.linspace(0, 5.0, 15)
+    t_values = np.linspace(0, 1.0, 50)
 
     # store results 
     acc_results = []
@@ -204,6 +204,8 @@ def perturb_in_direction(fname, patterns_per_num, direction, n_p=50, just_return
         pertubation = t.tensor(t_val * proj_v, dtype=t.float32).to(device="cuda")
         params_vector = params_vector + pertubation
         vector_to_parameters(params_vector, model.parameters())
+        if make_movie:
+            save_frames_weights(idx, model)
         # evaluating model 
         op_05_accuracy, op_05_loss = test(model, data_loader_05_test, do_print=False, device="cuda", calc_loss=True, max_batches=100)
         pure_num_acc, pure_num_loss = test(model, data_loader_test_number, do_print=False, device="cuda", calc_loss=True, max_batches=100)
@@ -213,9 +215,6 @@ def perturb_in_direction(fname, patterns_per_num, direction, n_p=50, just_return
         # store results
         acc_results.append((t_val, op_05_accuracy, pure_num_acc, pure_pattern_acc))
         loss_results.append((t_val, op_05_loss, pure_num_loss, pure_pattern_loss))
-
-        if make_movie:
-            save_frames(idx, model, data_loader_05_test)
 
     # write results to textfile
     with open(f"perturbation_results_{direction}_acc.txt", "w") as f:

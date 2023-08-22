@@ -39,3 +39,9 @@ def plot_embeddings_movie(model, step):
         os.mkdir("frames")
     plt.savefig(f"frames/embeddings_movie_{step:04}.png")  # change 'i' to your step variable
     plt.close()
+
+def plot_embeddings_movie_unchunked(model, step):
+    if not os.path.exists("frames"):
+        os.mkdir("frames")
+    model.project_to_fourier_mode(f"frames/embeddings_movie_{step:04}.png")
+    

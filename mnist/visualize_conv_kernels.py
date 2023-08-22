@@ -62,7 +62,7 @@ def visualize_all_classes(model, data_loader, layer_name, save_path=None):
         handle.remove()
     plt.close()
 
-def visualize_weights(model, layer_name, save_path=None):
+def visualize_conv_weights(model, layer_name, save_path=None):
     plt.clf()
     if layer_name == 'conv1':
         weights = model.conv1[0].weight.detach().cpu().numpy()
@@ -93,6 +93,17 @@ def visualize_weights(model, layer_name, save_path=None):
         plt.savefig(save_path)
     plt.close()
 
+def visualize_fc_weights(model, layer, save_path=None):
+    plt.clf()
+    if layer == 'fc1':
+        weights = model.fc1.weight.detach().cpu().numpy()
+    else:
+        weights = model.fc2.weight.detach().cpu().numpy()
+    plt.figure(figsize=(weights.shape[1]//2, weights.shape[0]//2))
+    plt.imshow(weights, cmap='gray')
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
 
 def run_movie_cmd(framedir, moviename):
     if not os.path.exists("movies"):
@@ -118,12 +129,20 @@ def save_frames_weights(step, model):
         os.mkdir(f"frames/conv1")
     if not os.path.exists(f"frames/conv2"):
         os.mkdir(f"frames/conv2")
-    visualize_weights(model, 'conv1', f"frames/conv1/frame_{step:04}.png")
-    visualize_weights(model, 'conv2', f"frames/conv2/frame_{step:04}.png")
+    if not os.path.exists(f"frames/fc1"):
+        os.mkdir(f"frames/fc1")
+    if not os.path.exists(f"frames/fc2"):
+        os.mkdir(f"frames/fc2")
+    visualize_conv_weights(model, 'conv1', f"frames/conv1/frame_{step:04}.png")
+    visualize_conv_weights(model, 'conv2', f"frames/conv2/frame_{step:04}.png")
+    visualize_fc_weights(model, 'fc1', f"frames/fc1/frame_{step:04}.png")
+    visualize_fc_weights(model, 'fc2', f"frames/fc2/frame_{step:04}.png")
 
 def make_conv_movies():
     run_movie_cmd("frames/conv1", f"conv1_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4")
     run_movie_cmd("frames/conv2", f"conv2_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4")
+    run_movie_cmd("frames/fc1", f"fc1_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4")
+    run_movie_cmd("frames/fc2", f"fc2_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4")
 
 if __name__ == "__main__":
     make_conv_movies()
