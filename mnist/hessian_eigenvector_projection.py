@@ -6,6 +6,7 @@ from utils import orthogonal_complement, plot_pertubation_results, plot_acc_pert
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from matplotlib import pyplot as plt
 from hessian_eig import hessian_eig
+from visualize_conv_kernels import make_conv_movies, save_frames_weights
 
 
 def perturb_in_direction_per_eig(fname, patterns_per_num, direction, n_eig_dirs=50, n_orth_dirs=50):
@@ -149,7 +150,7 @@ def eigenvector_similarity(fname, patterns_per_num, n_p=10):
     plt.savefig("eigenvector_similarity_pattern_opacity_05.png")
 
 
-def perturb_in_direction(fname, patterns_per_num, direction, n_p=50, just_return_proj_v=False):
+def perturb_in_direction(fname, patterns_per_num, direction, n_p=50, just_return_proj_v=False, make_movie=False):
     """
     fname: checkpoint file name
     patterns_per_num: number of patterns per digit
@@ -187,12 +188,12 @@ def perturb_in_direction(fname, patterns_per_num, direction, n_p=50, just_return
     _, data_loader_05_test = load_mnist_data(patterns_per_num, opacity=0.5)
 
 
-    t_values = np.linspace(0, 0.5, 50)
+    t_values = np.linspace(0, 5.0, 15)
 
     # store results 
     acc_results = []
     loss_results = []
-    for t_val in t_values:
+    for idx, t_val in enumerate(t_values):
         # load model 
         model = CNN(input_size=28)
         model.load_state_dict(t.load(fname))
@@ -213,6 +214,9 @@ def perturb_in_direction(fname, patterns_per_num, direction, n_p=50, just_return
         acc_results.append((t_val, op_05_accuracy, pure_num_acc, pure_pattern_acc))
         loss_results.append((t_val, op_05_loss, pure_num_loss, pure_pattern_loss))
 
+        if make_movie:
+            save_frames_weights(idx, model)
+
     # write results to textfile
     with open(f"perturbation_results_{direction}_acc.txt", "w") as f:
         for result in acc_results:
@@ -224,6 +228,8 @@ def perturb_in_direction(fname, patterns_per_num, direction, n_p=50, just_return
     # plot results
     plot_pertubation_results(acc_results, f'perturbation_acc_results_{direction}.png', yaxis='Accuracy (%)')
     plot_pertubation_results(loss_results, f'perturbation_loss_results_{direction}.png', yaxis='Loss')
+
+    make_conv_movies()
 
 def get_hessian(eigenvectors, eigenvalues):
     eigenvectors = np.array(eigenvectors)
@@ -409,6 +415,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("model_path", help="path to model to load")
     parser.add_argument("--preserve", help="preserve number or pattern performance", type=str, default=None, required=False)
+    parser.add_argument("--movie", help="generate movie visualizing conv kernels", action="store_true", default=False, required=False)
     parser.add_argument("--opacity", help="opacity of patterns in loss data", type=float, default=0.5, required=False)
     parser.add_argument("--patterns_per_num", help="number of patterns per digit", type=int, default=10, required=False)
     parser.add_argument("--mixed", help="use mixed data loader", action="store_true", default=False, required=False)
@@ -417,7 +424,8 @@ if __name__ == "__main__":
     opacity = args.opacity
     patterns_per_num = args.patterns_per_num
     use_mixed_dataloader = args.mixed
+    movie = args.movie
     if args.preserve is not None:
-        perturb_in_direction(model_path, patterns_per_num, args.preserve)
+        perturb_in_direction(model_path, patterns_per_num, args.preserve, make_movie=movie)
     else:
         get_hessian_eig_mnist(model_path, patterns_per_num=patterns_per_num, opacity=opacity, use_mixed_dataloader=use_mixed_dataloader)
