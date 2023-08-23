@@ -3,6 +3,7 @@
 ## Relevant posts
 
 - [2023-08-14: Decomposing independent generalizations in neural networks via Hessian analysis](https://www.lesswrong.com/posts/8ms977XZ2uJ4LnwSR/decomposing-independent-generalizations-in-neural-networks)
+- [2023-08-23: The Low-Hanging Fruit Prior and sloped valleys in the loss landscape](https://www.lesswrong.com/posts/SbzptgFYr272tMbgz/the-low-hanging-fruit-prior-and-sloped-valleys-in-the-loss)
 
 ## Codebase
 
