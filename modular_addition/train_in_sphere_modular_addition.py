@@ -2,10 +2,10 @@ import torch as t
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from utils import reshape_submodule_param_vector, get_weight_norm
 from mlp_modular import (
-    MLP,
     test_model,
     get_train_test_loaders,
-    plot_embeddings_chunks,
+    MLP_unchunked,
+    
 )
 import torch as t
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
@@ -134,8 +134,8 @@ def train_in_sphere(
 def main(checkpoint_path = "modular_addition.ckpt"):
     # Parameters
     VOCAB_SIZE = 38
-    EMBED_DIM = 8
-    HIDDEN_DIM = 8
+    EMBED_DIM = 14
+    HIDDEN_DIM = 32
     N_EPOCHS = 10000
     N_EIGENVECTORS = 35
     LAMBDA_SPHERE = 20
@@ -145,7 +145,7 @@ def main(checkpoint_path = "modular_addition.ckpt"):
     WEIGHT_REG = 0.005
 
     # Used to calculate eigenvectors for sphere search 
-    model = MLP(vocab_size=VOCAB_SIZE, embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM)
+    model = MLP_unchunked(vocab_size=VOCAB_SIZE, embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM)
     model.load_state_dict(t.load(checkpoint_path))
     model.to(device="cuda")
     model.eval()
@@ -180,8 +180,8 @@ def main(checkpoint_path = "modular_addition.ckpt"):
             weight_reg=WEIGHT_REG,
             initial_params=initial_params
         )
-        plot_embeddings_chunks(model, filename=f"embeddings_chunks_{radius}.png")
-        start_model = MLP(vocab_size=VOCAB_SIZE, embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM)
+        model.project_to_fourier_mode(f"modular_addition_sphere_{radius}.png")
+        start_model = MLP_unchunked(vocab_size=VOCAB_SIZE, embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM)
         start_model.load_state_dict(t.load("modular_addition_sphere_model.pth"))
         initial_params = parameters_to_vector(start_model.parameters()).detach().cuda()
 
