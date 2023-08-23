@@ -135,7 +135,7 @@ class MLP_unchunked(nn.Module):
         plt.clf()
 
         # Determine the layout for a roughly square configuration
-        n_plots = (n + 1)//2
+        n_plots = (n + 1) // 2
         num_cols = int(math.ceil(math.sqrt(n_plots)))
         num_rows = int(math.ceil(n_plots / num_cols))
         plt.figure(figsize=(num_cols * 2, num_rows * 2))
@@ -292,10 +292,11 @@ def train(
     optimizer = t.optim.AdamW(model.parameters(), lr=0.01, weight_decay=0.0)
     scheduler = t.optim.lr_scheduler.ExponentialLR(optimizer, gamma=1)
     criterion = nn.CrossEntropyLoss()
-    epochs = 3000
+    epochs = 400
     device = t.device("cuda" if t.cuda.is_available() else "cpu")
     model.to(device)
     step = 0
+    frame_n = 0
     for epoch in range(epochs):
         model.train()
         train_loss = 0
@@ -307,16 +308,17 @@ def train(
             train_loss += loss.item()
             loss.backward()
             optimizer.step()
+            frame_n += 1
+            if save_frames:
+                if frame_n % 10 == 0:
+                    with t.no_grad():
+                        step += 1
+                        if use_unchunked:
+                            plot_embeddings_movie_unchunked(model, step)
+                        else:
+                            plot_embeddings_movie(model, step)
         model.eval()
-        if save_frames:
-            if epoch % 30 == 0:
-                with t.no_grad():
-                    step += 1
-                    if use_unchunked:
-                        plot_embeddings_movie_unchunked(model, step)
-                    else:
-                        plot_embeddings_movie(model, step)
-        if epoch % 200 == 0:
+        if epoch % 50 == 0:
             val_loss, val_acc = test_model(model, test_loader, device, criterion)
             train_loss, train_acc = test_model(model, train_loader, device, criterion)
             print(
@@ -363,11 +365,11 @@ def experiment(model, test_loader, frac=0.5):
 
 
 if __name__ == "__main__":
-    train_frac = 0.5
+    train_frac = 0.7
     batch_size = 256
     vocab_size = 38
-    embed_dim = 12
-    hidden_dim = 24
+    embed_dim = 14
+    hidden_dim = 32
     train_loader, test_loader = get_train_test_loaders(
         train_frac, batch_size, vocab_size
     )
@@ -379,7 +381,7 @@ if __name__ == "__main__":
         hidden_dim=hidden_dim,
         save_frames=True,
         use_circular_embeddings=False,
-        reg=0.005,
+        reg=0.001,
         freeze_embed=False,
         use_unchunked=True,
     )
