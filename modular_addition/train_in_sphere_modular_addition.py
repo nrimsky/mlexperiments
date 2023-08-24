@@ -50,11 +50,11 @@ def sphere_localized_loss_adjustment_multiple(
     model,
     new_offset,
     top_eigenvectors_new,
+    old_reg,
     radius=1,
     lambda_sphere=10,
     lambda_orth=0.1,
     gamma = 0.1,
-    old_reg,
     device="cuda",
 ):
     """
