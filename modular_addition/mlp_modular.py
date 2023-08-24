@@ -370,6 +370,7 @@ if __name__ == "__main__":
     vocab_size = 38
     embed_dim = 14
     hidden_dim = 32
+    use_unchunked = False
     train_loader, test_loader = get_train_test_loaders(
         train_frac, batch_size, vocab_size
     )
@@ -383,14 +384,24 @@ if __name__ == "__main__":
         use_circular_embeddings=False,
         reg=0.001,
         freeze_embed=False,
-        use_unchunked=True,
+        use_unchunked=use_unchunked,
     )
     run_movie_cmd()
-    model = MLP_unchunked(
-        vocab_size=vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim
-    )
+    if use_unchunked:
+        model = MLP_unchunked(
+            vocab_size=vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim
+        )
+    else:
+        model = MLP(
+            vocab_size=vocab_size,
+            embed_dim=embed_dim,
+            hidden_dim=hidden_dim,
+            freeze_embed=False,
+            use_circular_embeddings=False,
+        )
     model.load_state_dict(t.load("modular_addition.ckpt"))
     model.eval()
     plot_embeddings(model, vocab_size)
-    # plot_embeddings_chunks(model)
-    # experiment(model, test_loader, frac=0.5)
+    if not use_unchunked:
+        plot_embeddings_chunks(model)
+        experiment(model, test_loader, frac=0.5)

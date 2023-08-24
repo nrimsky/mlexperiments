@@ -5,6 +5,7 @@ import numpy as np
 from utils import get_weight_norm
 from mlp_modular import MLP_unchunked, get_train_test_loaders
 
+
 def hessian_eig_modular_addition(
     model,
     loss_fn,
@@ -64,22 +65,35 @@ def hessian_eig_modular_addition(
     eigenvectors = np.transpose(eigenvectors)
     return tot, eigenvalues, eigenvectors
 
-#comparing generalization spaces between "base" model and "sphere search" model
-def hessian_comparison(
-    model,
-    new_model,
-    loss_fn,
-    train_data_loader,
-    reg):
-    new_eigenvectors = hessian_eig_modular_addition(new_model, loss_fn, train_data_loader, device="cuda", n_top_vectors=15, param_extract_fn=None, reg=reg)[2]
-    old_eigenvectors = hessian_eig_modular_addition(model, loss_fn, train_data_loader, device="cuda", n_top_vectors=5, param_extract_fn=None, reg=reg)[2]
-    
+
+# comparing generalization spaces between "base" model and "sphere search" model
+def hessian_comparison(model, new_model, loss_fn, train_data_loader, reg):
+    new_eigenvectors = hessian_eig_modular_addition(
+        new_model,
+        loss_fn,
+        train_data_loader,
+        device="cuda",
+        n_top_vectors=15,
+        param_extract_fn=None,
+        reg=reg,
+    )[2]
+    old_eigenvectors = hessian_eig_modular_addition(
+        model,
+        loss_fn,
+        train_data_loader,
+        device="cuda",
+        n_top_vectors=5,
+        param_extract_fn=None,
+        reg=reg,
+    )[2]
+
     new_eigenvectors = t.tensor(new_eigenvectors, dtype=t.float32, device="cuda")
     old_eigenvectors = t.tensor(old_eigenvectors, dtype=t.float32, device="cuda")
     new_proj = t.mm(new_eigenvectors.T, new_eigenvectors)
     old_projected = t.mm(new_proj, old_eigenvectors.T)
-    defect = t.norm(old_eigenvectors, p=2)/t.norm(old_projected, p=2)
-    return defect
+    defect = t.norm(old_eigenvectors, p=2) / t.norm(old_projected, p=2)
+    return defect.item()
+
 
 if __name__ == "__main__":
     vocab_size = 38
@@ -93,10 +107,5 @@ if __name__ == "__main__":
     model1.load_state_dict(t.load("modular_addition.ckpt"))
     model2.load_state_dict(t.load("modular_addition_sphere_model.pth"))
     loss = t.nn.CrossEntropyLoss()
-    train_loader, _ = get_train_test_loaders(
-        1, 64, vocab_size
-    )
+    train_loader, _ = get_train_test_loaders(1, 64, vocab_size)
     print(hessian_comparison(model1, model2, loss, train_loader, reg))
-
-
-

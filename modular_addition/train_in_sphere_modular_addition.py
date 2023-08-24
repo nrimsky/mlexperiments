@@ -5,7 +5,6 @@ from mlp_modular import (
     test_model,
     get_train_test_loaders,
     MLP_unchunked,
-    
 )
 import torch as t
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
@@ -43,8 +42,11 @@ def sphere_localized_loss_adjustment(
     offset_proj = t.mv(proj_matrix, offset)
     r_proj_params = t.norm(params_proj - offset_proj)
     sphere_reg = lambda_sphere * (r_proj_params - radius) ** 2
-    orth_reg = lambda_orth * t.norm(params_vector - offset - params_proj + offset_proj) ** 2
+    orth_reg = (
+        lambda_orth * t.norm(params_vector - offset - params_proj + offset_proj) ** 2
+    )
     return sphere_reg, orth_reg
+
 
 def sphere_localized_loss_adjustment_multiple(
     model,
@@ -54,7 +56,7 @@ def sphere_localized_loss_adjustment_multiple(
     radius=1,
     lambda_sphere=10,
     lambda_orth=0.1,
-    gamma = 0.1,
+    gamma=0.1,
     device="cuda",
 ):
     """
@@ -75,8 +77,11 @@ def sphere_localized_loss_adjustment_multiple(
     offset_proj = t.mv(proj_matrix, offset)
     r_proj_params = t.norm(params_proj - offset_proj)
     sphere_reg = lambda_sphere * (r_proj_params - radius) ** 2
-    orth_reg = lambda_orth * t.norm(params_vector - offset - params_proj + offset_proj) ** 2
-    return lambda_sphere*sphere_reg + lambda_orth*orth_reg + gamma*old_reg
+    orth_reg = (
+        lambda_orth * t.norm(params_vector - offset - params_proj + offset_proj) ** 2
+    )
+    return lambda_sphere * sphere_reg + lambda_orth * orth_reg + gamma * old_reg
+
 
 def train_in_sphere(
     model,
@@ -90,7 +95,7 @@ def train_in_sphere(
     device="cuda",
     lr_decay=0.999,
     weight_reg=0.05,
-    initial_params=None
+    initial_params=None,
 ):
     model.to(device)
     offset = parameters_to_vector(model.parameters()).detach()
@@ -113,9 +118,7 @@ def train_in_sphere(
     else:
         vector_to_parameters(initial_params, model.parameters())
 
-    optimizer = t.optim.AdamW(
-        get_module_parameters(model), lr=lr, weight_decay=0
-    )
+    optimizer = t.optim.AdamW(get_module_parameters(model), lr=lr, weight_decay=0)
     scheduler = t.optim.lr_scheduler.ExponentialLR(optimizer, gamma=lr_decay)
     ce_loss = t.nn.CrossEntropyLoss()
     model.train()
@@ -162,13 +165,15 @@ def train_in_sphere(
     return model
 
 
-
 def train_multiple_in_sphere(
-    #takes in list of offsets (as prev. found gen's), outputs new gen
     model,
-    offsets_prev = [],
     dataloader,
     top_eigenvectors,
+    loss_fn,
+    test_loader,
+    n_top_vectors,
+    reg,
+    offsets_prev=[],
     radius=1,
     lambda_sphere=10,
     lambda_orth=0.1,
@@ -177,24 +182,26 @@ def train_multiple_in_sphere(
     device="cuda",
     lr_decay=0.999,
     weight_reg=0.05,
-    initial_params=None
+    initial_params=None,
 ):
     model.to(device)
     adjustment = 0
-    for offset in prev_offsets:
+    for offset in offsets_prev:
         _, _, eigenvectors = hessian_eig_modular_addition(
             model,
             loss_fn,
             test_loader,
             device="cuda",
-            n_top_vectors,
+            n_top_vectors=n_top_vectors,
             param_extract_fn=get_module_parameters,
-            reg,
+            reg=reg,
         )
-        adjustment = sphere_localized_loss_adjustment_multiple(model, new_offset = offset, top_eigenvectors=eigenvectors, old_reg=adjustment)
+        adjustment = sphere_localized_loss_adjustment_multiple(
+            model, new_offset=offset, top_eigenvectors=eigenvectors, old_reg=adjustment
+        )
 
     top_eigenvector = []
-#    offset = parameters_to_vector(model.parameters()).detach()
+    #    offset = parameters_to_vector(model.parameters()).detach()
     if initial_params is None:
         # reshape all eigenvectors to be the same shape as the model parameters
         top_eigenvectors[i] = t.stack(
@@ -214,9 +221,7 @@ def train_multiple_in_sphere(
     else:
         vector_to_parameters(initial_params, model.parameters())
 
-    optimizer = t.optim.AdamW(
-        get_module_parameters(model), lr=lr, weight_decay=0
-    )
+    optimizer = t.optim.AdamW(get_module_parameters(model), lr=lr, weight_decay=0)
     scheduler = t.optim.lr_scheduler.ExponentialLR(optimizer, gamma=lr_decay)
     ce_loss = t.nn.CrossEntropyLoss()
     model.train()
@@ -239,13 +244,9 @@ def train_multiple_in_sphere(
                 lambda_orth,
                 device=device,
             )
-#           loss_term = loss_prev(args, prev_val)
-#            prev_val = loss_term.detach()
             loss_main = ce_loss(model(a.to(device), b.to(device)), res.to(device))
             weight_reg_loss = get_weight_norm(model) * weight_reg
             tot_adjustment += float(adjustment)
-            # tot_sphere_reg += sphere_reg.item()
-            # tot_orth_reg += orth_reg.item()
             tot_ce_loss += loss_main.item()
             tot_weight_reg_loss += float(weight_reg_loss)
             loss = loss_main + weight_reg_loss + adjustment
@@ -257,8 +258,6 @@ def train_multiple_in_sphere(
                 f"Epoch {epoch}/{n_epochs}, avg_sphere_reg = {tot_sphere_reg/idx}, avg_orth_reg = {tot_orth_reg/idx}, avg_ce_loss = {tot_ce_loss/idx} avg_weight_reg_loss = {tot_weight_reg_loss/idx}"
             )
             idx = 0
-            # tot_sphere_reg = 0
-            # tot_orth_reg = 0
             tot_adjustment = 0
             tot_ce_loss = 0
             tot_weight_reg_loss = 0
@@ -268,8 +267,7 @@ def train_multiple_in_sphere(
     return model
 
 
-
-def main(checkpoint_path = "modular_addition.ckpt"):
+def main(checkpoint_path="modular_addition.ckpt"):
     # Parameters
     VOCAB_SIZE = 38
     EMBED_DIM = 14
@@ -277,13 +275,15 @@ def main(checkpoint_path = "modular_addition.ckpt"):
     N_EPOCHS = 10000
     N_EIGENVECTORS = 35
     LAMBDA_SPHERE = 20
-    LAMBDA_ORTH = .2
+    LAMBDA_ORTH = 0.2
     LR = 0.01
     LR_DECAY = 0.9997
     WEIGHT_REG = 0.005
 
-    # Used to calculate eigenvectors for sphere search 
-    model = MLP_unchunked(vocab_size=VOCAB_SIZE, embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM)
+    # Used to calculate eigenvectors for sphere search
+    model = MLP_unchunked(
+        vocab_size=VOCAB_SIZE, embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM
+    )
     model.load_state_dict(t.load(checkpoint_path))
     model.to(device="cuda")
     model.eval()
@@ -316,13 +316,14 @@ def main(checkpoint_path = "modular_addition.ckpt"):
             device="cuda",
             lr_decay=LR_DECAY,
             weight_reg=WEIGHT_REG,
-            initial_params=initial_params
+            initial_params=initial_params,
         )
         model.project_to_fourier_mode(f"modular_addition_sphere_{radius}.png")
-        start_model = MLP_unchunked(vocab_size=VOCAB_SIZE, embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM)
+        start_model = MLP_unchunked(
+            vocab_size=VOCAB_SIZE, embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM
+        )
         start_model.load_state_dict(t.load("modular_addition_sphere_model.pth"))
         initial_params = parameters_to_vector(start_model.parameters()).detach().cuda()
-
 
 
 if __name__ == "__main__":
