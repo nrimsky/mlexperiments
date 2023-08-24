@@ -62,3 +62,21 @@ def hessian_eig_modular_addition(
         tot = 0
     eigenvectors = np.transpose(eigenvectors)
     return tot, eigenvalues, eigenvectors
+
+#comparing generalization spaces between "base" model and "sphere search" model
+def hessian_comparison(
+    model,
+    new_model,
+    loss_fn,
+    train_data_loader,
+    device="cuda",
+#    n_top_vectors=200,
+    param_extract_fn=None,
+    reg=0.002,):
+    new_eigenvectors = hessian_eig_modular_addition(new_model, loss_fn, train_data_loader, device="cuda", n_top_vectors=30, param_extract_fn=None, reg=0.002)[2]
+    old_eigenvectors = hessian_eig_modular_addition(old, loss_fn, train_data_loader, device="cuda", n_top_vectors=10, param_extract_fn=None, reg=0.002)[2]
+    new_proj = t.mm(new_eigenvectors.T, new_eigenvectors)
+    old_projected = t.mm(new_proj, old_eigenvectors.T)
+    defect = t.norm(old_eigenvectors, p=2)/t.norm(old_projected, p=2)
+    return defect
+
