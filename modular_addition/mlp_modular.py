@@ -369,7 +369,7 @@ if __name__ == "__main__":
     batch_size = 256
     vocab_size = 38
     embed_dim = 14
-    hidden_dim = 32
+    hidden_dim = 12
     use_unchunked = False
     train_loader, test_loader = get_train_test_loaders(
         train_frac, batch_size, vocab_size
