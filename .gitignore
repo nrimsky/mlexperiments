@@ -1,6 +1,8 @@
 __pycache__
 data 
-*.ckpt
+models/*.ckpt
+modular_addition/**.ckpt
+mnist/**.ckpt
 venv
 .vscode
 .DS_Store

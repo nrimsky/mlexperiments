@@ -11,7 +11,7 @@ def run_movie_cmd():
     if not os.path.exists("movies"):
         os.mkdir("movies")
     mp4_name = os.path.join('movies', f'movie_{datetime.now().strftime("%Y%m%d_%H%M%S")}.mp4')
-    os.system(f'ffmpeg -framerate 3 -i frames/embeddings_movie_%04d.png -c:v libx264 -pix_fmt yuv420p {mp4_name}')
+    os.system(f'ffmpeg -framerate 3 -i frames/embeddings_movie_%06d.png -c:v libx264 -pix_fmt yuv420p {mp4_name}')
     os.system('rm frames/embeddings_movie_*.png')
     print(f'movie saved as {mp4_name}')
 
@@ -37,11 +37,11 @@ def plot_embeddings_movie(model, step):
     # make /frames if it does not exist
     if not os.path.exists("frames"):
         os.mkdir("frames")
-    plt.savefig(f"frames/embeddings_movie_{step:04}.png")  # change 'i' to your step variable
+    plt.savefig(f"frames/embeddings_movie_{step:06}.png")  # change 'i' to your step variable
     plt.close()
 
 def plot_embeddings_movie_unchunked(model, step):
     if not os.path.exists("frames"):
         os.mkdir("frames")
-    model.project_to_fourier_mode(f"frames/embeddings_movie_{step:04}.png")
+    model.project_to_fourier_mode(f"frames/embeddings_movie_{step:06}.png")
     

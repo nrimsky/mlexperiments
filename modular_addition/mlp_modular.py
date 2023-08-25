@@ -292,7 +292,7 @@ def train(
     optimizer = t.optim.AdamW(model.parameters(), lr=0.01, weight_decay=0.0)
     scheduler = t.optim.lr_scheduler.ExponentialLR(optimizer, gamma=1)
     criterion = nn.CrossEntropyLoss()
-    epochs = 400
+    epochs = 500
     device = t.device("cuda" if t.cuda.is_available() else "cpu")
     model.to(device)
     step = 0
@@ -369,8 +369,8 @@ if __name__ == "__main__":
     batch_size = 256
     vocab_size = 38
     embed_dim = 14
-    hidden_dim = 12
-    use_unchunked = False
+    hidden_dim = 32
+    use_unchunked = True
     train_loader, test_loader = get_train_test_loaders(
         train_frac, batch_size, vocab_size
     )
