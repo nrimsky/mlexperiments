@@ -20,14 +20,31 @@ def get_module_parameters(model):
     return model.embedding.parameters()
 
 
+def quadratic_form(top_eigenvalues, top_eigenvectors):
+    # Create a diagonal matrix with the eigenvalues
+    Lambda = torch.diag(top_eigenvalues)
+    Q = top_eigenvectors.T
+    # Return the function that evaluates the quadratic form
+    def evaluate(v):
+        intermediate = torch.matmul(Q.T, v)  # Q^T * v
+        scaled = intermediate * top_eigenvalues  # Element-wise multiplication with Lambda
+        result = torch.matmul(Q, scaled)  # Q * scaled
+        return torch.dot(v, result)  # v^T * result
+    
+    return evaluate
+
+
+
 def sphere_localized_loss_adjustment(
     model,
     top_eigenvectors,
     offset,
+    top_eigenvalues = None,    
     radius=1,
     lambda_sphere=10,
     lambda_orth=0.1,
     device="cuda",
+    subtract_quad = False
 ):
     """
     model: mlp
@@ -47,19 +64,26 @@ def sphere_localized_loss_adjustment(
     offset_proj = t.mv(proj_matrix, offset)
     r_proj_params = t.norm(params_proj - offset_proj)
     sphere_reg = lambda_sphere * (r_proj_params - radius) ** 2
+    stab_reg = lambda_stab * (r_proj_params - radius) ** 4
+    quad_term = 0
+    if top_eigenvalues != None:
+        quad_term = quadratic_form(top_eigenvalues, top_eigenvectors)
     orth_reg = (
         lambda_orth * t.norm(params_vector - offset - params_proj + offset_proj) ** 2
     )
-    return sphere_reg, orth_reg
+    return sphere_reg, orth_reg, stab_reg, quad_term
 
 
 def train_in_sphere(
     model,
     dataloader,
     top_eigenvectors,
+    top_eigenvalues = None,
+    subtract_quad = False
     radius=1,
     lambda_sphere=10,
     lambda_orth=0.1,
+    lambda_stab=0, #4th-power term to neutralize runaway SGD after subtracting quadratic term
     lr=1e-3,
     n_epochs=3,
     device="cuda",
@@ -106,14 +130,17 @@ def train_in_sphere(
                 plot_embeddings_movie_unchunked(model, step)
             idx += 1
             optimizer.zero_grad()
-            sphere_reg, orth_reg = sphere_localized_loss_adjustment(
+            sphere_reg, orth_reg, stab_reg, quad_term = sphere_localized_loss_adjustment(
                 model,
                 top_eigenvectors,
                 offset,
                 radius,
                 lambda_sphere,
                 lambda_orth,
-                device=device,
+                top_eigenvalues,
+                top_eigenvectors = top_eigenvectors
+                subtract_quad = subtract_quad
+                device = device,
             )
             loss_main = ce_loss(model(a.to(device), b.to(device)), res.to(device))
             weight_reg_loss = get_weight_norm(model) * weight_reg
@@ -121,7 +148,7 @@ def train_in_sphere(
             tot_orth_reg += orth_reg.item()
             tot_ce_loss += loss_main.item()
             tot_weight_reg_loss += float(weight_reg_loss)
-            loss = loss_main + sphere_reg + orth_reg + weight_reg
+            loss = loss_main + sphere_reg + orth_reg + weight_reg + stab_reg - quad_term
             loss.backward()
             optimizer.step()
         scheduler.step()
@@ -146,12 +173,16 @@ def main(checkpoint_path="modular_addition.ckpt"):
     EMBED_DIM = 14
     HIDDEN_DIM = 32
     N_EPOCHS = 3000
-    N_EIGENVECTORS = 24
+    N_EIGENVECTORS = 50
+    BOUND_EIGENVECTORS = 15
     LAMBDA_SPHERE = 20
     LAMBDA_ORTH = 0.5
+    LAMBDA_STAB = 0.1
+    SUBTRACT_QUAD = True
     LR = 0.01
     LR_DECAY = 0.9997
     WEIGHT_REG = 0.001
+    QUAD_TERM = 0
     # Used to calculate eigenvectors for sphere search
     model = MLP_unchunked(
         vocab_size=VOCAB_SIZE, embed_dim=EMBED_DIM, hidden_dim=HIDDEN_DIM
@@ -164,7 +195,7 @@ def main(checkpoint_path="modular_addition.ckpt"):
     train_loader, test_loader = get_train_test_loaders(
         train_frac=0.4, batch_size=256, vocab_size=VOCAB_SIZE
     )
-    _, _, eigenvectors = hessian_eig_modular_addition(
+    _, eigenvalues, eigenvectors = hessian_eig_modular_addition(
         model,
         loss_fn,
         test_loader,
@@ -184,7 +215,7 @@ def main(checkpoint_path="modular_addition.ckpt"):
             eigen_model.load_state_dict(t.load("modular_addition_sphere_model.pth"))
             eigen_model.to(device="cuda")
             eigen_model.eval()
-            _, _, eigenvectors = hessian_eig_modular_addition(
+            _, eigenvalues, eigenvectors = hessian_eig_modular_addition(
                 eigen_model,
                 loss_fn,
                 test_loader,
@@ -193,14 +224,16 @@ def main(checkpoint_path="modular_addition.ckpt"):
                 param_extract_fn=get_module_parameters,
                 reg=WEIGHT_REG,
             )
-        for radius in [5]:
+        for radius in [15]:
             _, frame_idx = train_in_sphere(
                 model,
                 train_loader,
                 eigenvectors,
                 radius=radius,
-                lambda_sphere=LAMBDA_SPHERE,
-                lambda_orth=LAMBDA_ORTH,
+                subtract_quad = SUBTRACT_QUAD
+                lambda_sphere = LAMBDA_SPHERE,
+                lambda_stab = LAMBDA_STAB
+                lambda_orth = LAMBDA_ORTH,
                 lr=LR,
                 n_epochs=N_EPOCHS,
                 device="cuda",
