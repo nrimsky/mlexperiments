@@ -17,7 +17,7 @@ from generate_movie import (
 
 
 def get_module_parameters(model):
-    return model.embedding.parameters()
+    return model.parameters()
 
 
 def quadratic_form(top_eigenvalues, top_eigenvectors, v):
@@ -175,8 +175,8 @@ def main(checkpoint_path="modular_addition.ckpt"):
     EMBED_DIM = 14
     HIDDEN_DIM = 32
     N_EPOCHS = 3000
-    N_EIGENVECTORS = 50
-    BOUND_EIGENVECTORS = 15
+    N_EIGENVECTORS = 35
+    BOUND_EIGENVECTORS = 20
     LAMBDA_SPHERE = 20
     LAMBDA_ORTH = 0.5
     LAMBDA_STAB = 0.1
@@ -205,6 +205,7 @@ def main(checkpoint_path="modular_addition.ckpt"):
         param_extract_fn=get_module_parameters,
         reg=WEIGHT_REG,
     )
+    eigenvalues, eigenvectors = eigenvalues[:-BOUND_EIGENVECTORS], eigenvectors[:-BOUND_EIGENVECTORS]
     initial_params = None
     frame_idx = 0
     for circuit in range(1):
@@ -225,7 +226,7 @@ def main(checkpoint_path="modular_addition.ckpt"):
                 param_extract_fn=get_module_parameters,
                 reg=WEIGHT_REG,
             )
-        for radius in [5, 10, 15]:
+        for radius in [15, 25, 30, 35, 40]:
             _, frame_idx = train_in_sphere(
                 model,
                 train_loader,
@@ -253,6 +254,9 @@ def main(checkpoint_path="modular_addition.ckpt"):
                 parameters_to_vector(start_model.parameters()).detach().to(DEVICE)
             )
         run_movie_cmd()
+
+
+        def ablate_other_modes(modes):
 
 
 if __name__ == "__main__":

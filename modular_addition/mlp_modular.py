@@ -1,6 +1,8 @@
 import torch as t
 import torch.nn as nn
 import torch.utils.data as data
+import hashlib
+
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 from generate_movie import (
@@ -10,12 +12,37 @@ from generate_movie import (
 )
 from itertools import combinations
 from utils import get_weight_norm
+from sympy import primerange
+
 import math
 
 
 def all_subsets(s):
     return [set(comb) for i in range(len(s) + 1) for comb in combinations(s, i)]
 
+
+def hash_with_seed(value, seed = 42):
+    m = hashlib.sha256()
+    m.update(str(seed).encode('utf-8'))
+    m.update(str(value).encode('utf-8'))
+    return int(m.hexdigest(), 16)
+
+
+
+class RandomOperationDataset(data.Dataset):
+    def __init__(self, d_vocab=114):
+        super().__init__()
+        self.d_vocab = d_vocab
+        self.eq_token = d_vocab - 1  # assuming '=' is the last token in the vocabulary
+
+    def __len__(self):
+        return (self.d_vocab - 1) ** 2
+
+    def __getitem__(self, idx):
+        a = idx // (self.d_vocab - 1)
+        b = idx % (self.d_vocab - 1)
+        res = hash_with_seed(a + b + a*b*self.d_vocab) % (self.d_vocab - 1)
+        return a, b, res
 
 class ModuloAdditionDataset(data.Dataset):
     def __init__(self, d_vocab=114):
@@ -97,6 +124,24 @@ class MLP(nn.Module):
         return self.linear3(x)
 
 
+def fourier_matrix(n):
+    fourier_matrix = t.zeros((n, n), dtype=t.cfloat)
+    for i in range(n):
+        for j in range(n):
+            theta = t.tensor(2 * t.pi * i * j / (n))
+            fourier_matrix[i, j] = t.complex(t.cos(theta), t.sin(theta))
+    return fourier_matrix
+
+def inv_fourier_matrix(n):
+    inv_fourier_matrix = t.zeros((n, n), dtype=t.cfloat)
+    for i in range(n):
+        for j in range(n):
+            theta = t.tensor(2 * t.pi * i * j / (n))
+            inv_fourier_matrix[i, j] = t.complex(t.cos(-theta), t.sin(-theta))
+            inv_fourier_matrix *= 1/(n)
+    return inv_fourier_matrix
+
+
 class MLP_unchunked(nn.Module):
     def __init__(self, embed_dim, vocab_size, hidden_dim):
         super().__init__()
@@ -126,6 +171,7 @@ class MLP_unchunked(nn.Module):
         fourier_matrix = fourier_matrix.to(embedding_weights.device)
         fourier_embedding = t.matmul(fourier_matrix, embedding_weights)
         return fourier_embedding
+
 
     def project_to_fourier_mode(self, filename):
         fourier_modes = self.get_fourier_modes()
@@ -169,6 +215,22 @@ class MLP_unchunked(nn.Module):
         plt.tight_layout()
         plt.savefig(filename)
         plt.close()
+
+
+
+def ablate_other_modes(model, modes, embedding):
+    n = self.vocab_size - 1
+    fourier_modes = get_fourier_modes(self)
+    inv_fourier_matrix = inv_fourier_matrix(n)
+    mask = torch.zeros(n, dtype=torch.float32)
+    # Use scatter_ to place zeros at the specified indices
+    mask.scatter_(0, modes, 1.0).to(t.cfloat)
+    fourier_modes *= mask
+    new_embed = t.matmul(inv_fourier_matrix, fourier_modes)
+    model.embedding = nn.Parameter(new_embed.to(device))
+    return(model)
+
+
 
 
 def add_embedding_noise(model, circuit_nums, device="cpu"):
@@ -251,8 +313,11 @@ def plot_embeddings(model, vocab_size):
     plt.savefig("embeddings.png")
 
 
-def get_train_test_loaders(train_frac, batch_size, vocab_size):
-    dataset = ModuloAdditionDataset(vocab_size)
+def get_train_test_loaders(train_frac, batch_size, vocab_size, randomize=False):
+    if randomize:
+        dataset = RandomOperationDataset(vocab_size)
+    else:
+        dataset = ModuloAdditionDataset(vocab_size)
     total_length = len(dataset)
     train_length = int(total_length * train_frac)
     test_length = total_length - train_length
@@ -270,6 +335,7 @@ def train(
     vocab_size=114,
     hidden_dim=32,
     embed_dim=16,
+    num_epochs = 500,
     save_frames=True,
     reg=0.005,
     use_circular_embeddings=False,
@@ -289,10 +355,11 @@ def train(
             use_circular_embeddings=use_circular_embeddings,
         )
     print(f"Number of parameters: {count_parameters(model)}")
-    optimizer = t.optim.AdamW(model.parameters(), lr=0.01, weight_decay=0.0)
+    # optimizer = t.optim.AdamW(model.parameters(), lr=0.01, weight_decay=0.0)
+    optimizer = t.optim.Adam(model.parameters(), lr=0.01, weight_decay=0.0)
     scheduler = t.optim.lr_scheduler.ExponentialLR(optimizer, gamma=1)
     criterion = nn.CrossEntropyLoss()
-    epochs = 500
+    epochs = num_epochs
     device = t.device("cuda" if t.cuda.is_available() else "cpu")
     model.to(device)
     step = 0
@@ -310,7 +377,7 @@ def train(
             optimizer.step()
             frame_n += 1
             if save_frames:
-                if frame_n % 10 == 0:
+                if frame_n % 100 == 0: #for big network might use 10
                     with t.no_grad():
                         step += 1
                         if use_unchunked:
@@ -325,6 +392,11 @@ def train(
                 f"Epoch {epoch}: train loss: {float(train_loss)}, train accuracy: {float(train_acc)}, val loss: {float(val_loss)}, val accuracy: {float(val_acc)}"
             )
         scheduler.step()
+        ###disrupt step
+        if epoch == 50:
+            model.embedding = nn.Parameter(t.randn(vocab_size, embed_dim))
+            optimizer = t.optim.Adam(model.parameters(), lr=0.01)
+
     t.save(model.state_dict(), "modular_addition.ckpt")
     return model
 
@@ -363,30 +435,37 @@ def experiment(model, test_loader, frac=0.5):
         )
         model.embedding = t.nn.Parameter(orig_embedding.to(device))
 
-
-if __name__ == "__main__":
-    train_frac = 0.7
-    batch_size = 256
-    vocab_size = 38
-    embed_dim = 14
-    hidden_dim = 32
-    use_unchunked = True
-    train_loader, test_loader = get_train_test_loaders(
-        train_frac, batch_size, vocab_size
-    )
-    train(
-        train_loader,
-        test_loader,
-        vocab_size=vocab_size,
-        embed_dim=embed_dim,
-        hidden_dim=hidden_dim,
-        save_frames=True,
-        use_circular_embeddings=False,
-        reg=0.001,
-        freeze_embed=False,
-        use_unchunked=use_unchunked,
-    )
-    run_movie_cmd()
+def train_manyprimes(
+        p_min = 17,
+        p_max = 217,
+        train_frac = 0.7,
+        batch_size = 256,
+        embed_dim = 8,
+        hidden_dim = 24,
+        use_unchunked = True,
+        randomize = True,
+    ):
+    primes = list(primerange(p_min, p_max+1))  
+    for p in primes:
+        vocab_size = p+1
+        print(f"prime{p}")
+        train_loader, test_loader = get_train_test_loaders(
+            train_frac, batch_size, vocab_size, randomize = randomize
+        )
+        train(
+            train_loader,
+            test_loader,
+            vocab_size=vocab_size,
+            hidden_dim=hidden_dim,
+            embed_dim=embed_dim,
+            num_epochs = 2000,
+            save_frames=False,
+            reg=0,
+            use_circular_embeddings=False,
+            freeze_embed=False,
+            use_unchunked=True,
+        )
+        run_movie_cmd(vocab_size - 1)
     if use_unchunked:
         model = MLP_unchunked(
             vocab_size=vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim
@@ -405,3 +484,108 @@ if __name__ == "__main__":
     if not use_unchunked:
         plot_embeddings_chunks(model)
         experiment(model, test_loader, frac=0.5)
+
+
+def train_manyfractions(
+        p = 37,     
+        batch_size = 256,
+        embed_dim = 8,
+        hidden_dim = 24,
+        use_unchunked = True,
+        randomize = True,
+    ):
+    vocab_size = p+1
+    fractions = [n/10 for n in range(1, 10)]
+    for fraction in fractions:
+        train_frac = fraction
+        print(f"fraction {fraction}")
+        train_loader, test_loader = get_train_test_loaders(
+            train_frac, batch_size, vocab_size, randomize = randomize
+        )
+        train(
+            train_loader,
+            test_loader,
+            vocab_size=vocab_size,
+            hidden_dim=hidden_dim,
+            embed_dim=embed_dim,
+            num_epochs = 2000,
+            save_frames=False,
+            reg=0,
+            use_circular_embeddings=False,
+            freeze_embed=False,
+            use_unchunked=True,
+        )
+        run_movie_cmd(p)
+    if use_unchunked:
+        model = MLP_unchunked(
+            vocab_size=vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim
+        )
+    else:
+        model = MLP(
+            vocab_size=vocab_size,
+            embed_dim=embed_dim,
+            hidden_dim=hidden_dim,
+            freeze_embed=False,
+            use_circular_embeddings=False,
+        )
+    model.load_state_dict(t.load("modular_addition.ckpt"))
+    model.eval()
+    plot_embeddings(model, vocab_size)
+    if not use_unchunked:
+        plot_embeddings_chunks(model)
+        experiment(model, test_loader, frac=0.5)
+
+
+if __name__ == "__main__":
+    train_manyfractions()
+    # p = 101
+    # train_frac = 0.7
+    # batch_size = 256
+    # vocab_size = p+1
+    # embed_dim = 4
+    # hidden_dim = 12
+    # use_unchunked = False
+    # randomize = False
+    # train_loader, test_loader = get_train_test_loaders(
+    #     train_frac, batch_size, vocab_size, randomize = randomize
+    # )
+    # train(
+    #     train_loader,
+    #     test_loader,
+    #     vocab_size=vocab_size,
+    #     hidden_dim=hidden_dim,
+    #     embed_dim=embed_dim,
+    #     num_epochs = 1000,
+    #     save_frames=True,
+    #     reg=0,
+    #     use_circular_embeddings=True,
+    #     freeze_embed=False,
+    #     use_unchunked=False,
+    # )
+    # run_movie_cmd(p)
+
+
+
+
+    # train_frac = 0.7
+    # batch_size = 256
+    # vocab_size = 38
+    # embed_dim = 14
+    # hidden_dim = 32
+    # use_unchunked = True
+    # train_loader, test_loader = get_train_test_loaders(
+    #     train_frac, batch_size, vocab_size
+    # )
+    # train(
+    #     train_loader,
+    #     test_loader,
+    #     vocab_size=vocab_size,
+    #     embed_dim=embed_dim,
+    #     hidden_dim=hidden_dim,
+    #     save_frames=True,
+    #     use_circular_embeddings=False,
+    #     reg=0.001,
+    #     freeze_embed=False,
+    #     use_unchunked=use_unchunked,
+    # )
+
