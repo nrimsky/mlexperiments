@@ -256,8 +256,7 @@ def main(checkpoint_path="modular_addition.ckpt"):
         run_movie_cmd()
 
 
-        def ablate_other_modes(modes):
-
+    
 
 if __name__ == "__main__":
     main()

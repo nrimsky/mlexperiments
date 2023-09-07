@@ -71,12 +71,19 @@ def plot_residues_on_grid(residue_lists, grid_shape=(2, 5)):
 # res9 = []
 # res10 = [3, 6, 9]
 
-# # Create a list containing all the residue lists
-# all_residues = [res1, res2, res3, res4, res5, res6, res7, res8, res9, res10]
+# Create a list containing all the residue lists
+all_residues = [res1, res2, res3, res4, res5, res6, res7, res8, res9, res10]
 print(NinasLists)
 plot_residues_on_grid(NinasLists)
 
-
+## checking if quotients between grokked residues follow a pattern
+# A = np.zeros(18)
+# for l in NinasLists:
+# 	for a in l:
+# 		for b in l:
+# 			i = (a-b)%18
+# 			A[i]+= 1
+# print(A)
 
 
 
