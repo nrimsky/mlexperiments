@@ -86,6 +86,7 @@ def make_circle_embeddings(embed_dim, vocab_size):
     return t.cat(M_k_list, dim=1)
 
 
+
 class MLP(nn.Module):
     def __init__(
         self,
@@ -377,7 +378,7 @@ def train(
             optimizer.step()
             frame_n += 1
             if save_frames:
-                if frame_n % 100 == 0: #for big network might use 10
+                if frame_n % 500 == 0: #for big network might use 10
                     with t.no_grad():
                         step += 1
                         if use_unchunked:
@@ -393,9 +394,9 @@ def train(
             )
         scheduler.step()
         ###disrupt step
-        if epoch == 50:
-            model.embedding = nn.Parameter(t.randn(vocab_size, embed_dim))
-            optimizer = t.optim.Adam(model.parameters(), lr=0.01)
+        # if epoch == 50:
+        #     model.embedding = nn.Parameter(t.randn(vocab_size, embed_dim))
+        #     optimizer = t.optim.Adam(model.parameters(), lr=0.01)
 
     t.save(model.state_dict(), "modular_addition.ckpt")
     return model
@@ -443,7 +444,7 @@ def train_manyprimes(
         embed_dim = 8,
         hidden_dim = 24,
         use_unchunked = True,
-        randomize = True,
+        randomize = False,
     ):
     primes = list(primerange(p_min, p_max+1))  
     for p in primes:
@@ -465,7 +466,7 @@ def train_manyprimes(
             freeze_embed=False,
             use_unchunked=True,
         )
-        run_movie_cmd(vocab_size - 1)
+        run_movie_cmd(suffix = f"p_{p}")
     if use_unchunked:
         model = MLP_unchunked(
             vocab_size=vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim
@@ -487,12 +488,13 @@ def train_manyprimes(
 
 
 def train_manyfractions(
-        p = 37,     
+        p = 23,     
         batch_size = 256,
-        embed_dim = 8,
-        hidden_dim = 24,
+        embed_dim = 6,
+        hidden_dim = 18,
         use_unchunked = True,
-        randomize = True,
+        randomize = False,
+        save_frames = False
     ):
     vocab_size = p+1
     fractions = [n/10 for n in range(1, 10)]
@@ -508,14 +510,14 @@ def train_manyfractions(
             vocab_size=vocab_size,
             hidden_dim=hidden_dim,
             embed_dim=embed_dim,
-            num_epochs = 2000,
-            save_frames=False,
+            num_epochs = 3500,
+            save_frames=save_frames,
             reg=0,
             use_circular_embeddings=False,
             freeze_embed=False,
-            use_unchunked=True,
+            use_unchunked=use_unchunked,
         )
-        run_movie_cmd(p)
+        run_movie_cmd(suffix = f"p_{p}_frac_{fraction}")
     if use_unchunked:
         model = MLP_unchunked(
             vocab_size=vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim
@@ -537,14 +539,15 @@ def train_manyfractions(
 
 
 if __name__ == "__main__":
-    train_manyfractions()
-    # p = 101
-    # train_frac = 0.7
+    train_manyfractions(randomize = False, save_frames = True)
+
+    # p = 229
+    # train_frac = 0.9
     # batch_size = 256
     # vocab_size = p+1
-    # embed_dim = 4
-    # hidden_dim = 12
-    # use_unchunked = False
+    # embed_dim = 8
+    # hidden_dim = 30
+    # use_unchunked = True
     # randomize = False
     # train_loader, test_loader = get_train_test_loaders(
     #     train_frac, batch_size, vocab_size, randomize = randomize
@@ -555,14 +558,14 @@ if __name__ == "__main__":
     #     vocab_size=vocab_size,
     #     hidden_dim=hidden_dim,
     #     embed_dim=embed_dim,
-    #     num_epochs = 1000,
+    #     num_epochs = 50,
     #     save_frames=True,
     #     reg=0,
-    #     use_circular_embeddings=True,
+    #     use_circular_embeddings=False,
     #     freeze_embed=False,
-    #     use_unchunked=False,
+    #     use_unchunked=True,
     # )
-    # run_movie_cmd(p)
+    # run_movie_cmd
 
 
 
