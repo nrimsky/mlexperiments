@@ -149,8 +149,8 @@ def train(model,
     for epoch in range(epochs):
         model.train()
         if freeze_mlp:
-            model.linear1.requires_grad = False
-            model.linear2.requires_grad = False
+            model.linear1.weight.requires_grad = False
+            model.linear2.weight.requires_grad = False
         train_loss = 0
         for x1, x2, target in train_loader:
             x1, x2, target = x1.to(device), x2.to(device), target.to(device)
@@ -196,7 +196,7 @@ def frac_test(vocab_size, Adam = True, sequential = False, graph = False, embed_
         hidden_dim=hidden_dim,
         embed_dim=embed_dim,
         num_lin_epochs = 50000,
-        reg=0.01,
+        reg=0.00,
         save_last_frame = True,
         suffix = f"vocab_{vocab_size}_e_{embed_dim}_h_{hidden_dim}_main",
     )
@@ -204,7 +204,7 @@ def frac_test(vocab_size, Adam = True, sequential = False, graph = False, embed_
     for frac in fracs(vocab_size, num_datapoints = 8):
         train_loader, test_loader = get_train_test_loaders(vocab_size = vocab_size, train_frac = frac, batch_size = BATCH_SIZE, randomize=False, seed=SEED)
         model = copy.deepcopy(original_model)
-        model.embedding = nn.Parameter(t.randn(vocab_size, embed_dim))
+        model.embedding = nn.Embedding(vocab_size, embed_dim)
         optimizer = t.optim.Adam(model.parameters(), lr=lr)
         train(model, 
             train_loader,

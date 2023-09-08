@@ -149,7 +149,7 @@ class MLP_unchunked(nn.Module):
         self.embedding = nn.Embedding(vocab_size, embed_dim)
         self.linear1 = nn.Linear(embed_dim, hidden_dim, bias=False)
         self.linear2 = nn.Linear(hidden_dim, vocab_size, bias=False)
-        self.silu = nn.SiLU()
+        self.gelu = nn.GELU()
         self.vocab_size = vocab_size
 
     def forward(self, x1, x2):
@@ -158,9 +158,8 @@ class MLP_unchunked(nn.Module):
         x1 = self.linear1(x1)
         x2 = self.linear1(x2)
         x = x1 + x2
-        x = self.silu(x)
-        x = self.linear2(x)
-        return x
+        x = self.gelu(x)
+        return self.linear2(x)
 
     def get_fourier_modes(self):
         embedding_weights = self.embedding.weight.detach().clone().cpu().to(t.cfloat)
@@ -199,20 +198,6 @@ class MLP_unchunked(nn.Module):
             plt.scatter(dot_products_cos[i].numpy(), dot_products_sin[i].numpy())
             plt.title(f"Mode {i}")
 
-        plt.tight_layout()
-        plt.savefig(filename)
-        plt.close()
-
-    def plot_fourier_modes(self, filename):
-        fourier_embedding = self.get_fourier_modes()
-        plt.clf()
-        # figsize should fit both real and imaginary parts subplots
-        plt.figure(figsize=(fourier_embedding.shape[1] * 2, fourier_embedding.shape[0]))
-        # plot real and imaginary parts separately
-        plt.subplot(1, 2, 1)
-        plt.imshow(fourier_embedding.real.cpu().numpy(), cmap="gray")
-        plt.subplot(1, 2, 2)
-        plt.imshow(fourier_embedding.imag.cpu().numpy(), cmap="gray")
         plt.tight_layout()
         plt.savefig(filename)
         plt.close()
@@ -340,6 +325,7 @@ def train(
     use_circular_embeddings=False,
     freeze_embed=False,
     use_unchunked=False,
+    lr=0.01
 ):
     if use_unchunked:
         model = MLP_unchunked(
@@ -355,7 +341,7 @@ def train(
         )
     print(f"Number of parameters: {count_parameters(model)}")
     # optimizer = t.optim.AdamW(model.parameters(), lr=0.01, weight_decay=0.0)
-    optimizer = t.optim.Adam(model.parameters(), lr=0.01, weight_decay=0.0)
+    optimizer = t.optim.Adam(model.parameters(), lr=lr, weight_decay=0.0)
     scheduler = t.optim.lr_scheduler.ExponentialLR(optimizer, gamma=1)
     criterion = nn.CrossEntropyLoss()
     epochs = num_epochs
@@ -537,56 +523,30 @@ def train_manyfractions(
 
 
 if __name__ == "__main__":
-    train_manyfractions(randomize = False, save_frames = True)
-
-    # p = 229
-    # train_frac = 0.9
-    # batch_size = 256
-    # vocab_size = p+1
-    # embed_dim = 8
-    # hidden_dim = 30
-    # use_unchunked = True
-    # randomize = False
-    # train_loader, test_loader = get_train_test_loaders(
-    #     train_frac, batch_size, vocab_size, randomize = randomize
-    # )
-    # train(
-    #     train_loader,
-    #     test_loader,
-    #     vocab_size=vocab_size,
-    #     hidden_dim=hidden_dim,
-    #     embed_dim=embed_dim,
-    #     num_epochs = 50,
-    #     save_frames=True,
-    #     reg=0,
-    #     use_circular_embeddings=False,
-    #     freeze_embed=False,
-    #     use_unchunked=True,
-    # )
-    # run_movie_cmd
-
-
-
-
-    # train_frac = 0.7
-    # batch_size = 256
-    # vocab_size = 38
-    # embed_dim = 14
-    # hidden_dim = 32
-    # use_unchunked = True
-    # train_loader, test_loader = get_train_test_loaders(
-    #     train_frac, batch_size, vocab_size
-    # )
-    # train(
-    #     train_loader,
-    #     test_loader,
-    #     vocab_size=vocab_size,
-    #     embed_dim=embed_dim,
-    #     hidden_dim=hidden_dim,
-    #     save_frames=True,
-    #     use_circular_embeddings=False,
-    #     reg=0.001,
-    #     freeze_embed=False,
-    #     use_unchunked=use_unchunked,
-    # )
+    train_frac = 0.7
+    batch_size = 256
+    vocab_size = 48
+    embed_dim = 8
+    hidden_dim = 32
+    lr = 0.01
+    epochs = 1000
+    use_unchunked = True
+    train_loader, test_loader = get_train_test_loaders(
+        train_frac, batch_size, vocab_size, randomize=False
+    )
+    model = train(
+        train_loader,
+        test_loader,
+        vocab_size=vocab_size,
+        embed_dim=embed_dim,
+        hidden_dim=hidden_dim,
+        save_frames=False,
+        use_circular_embeddings=False,
+        reg=0.0001,
+        num_epochs=epochs,
+        freeze_embed=False,
+        use_unchunked=use_unchunked,
+        lr=lr
+    )
+    model.project_to_fourier_mode("fourier_modes.png")
 
