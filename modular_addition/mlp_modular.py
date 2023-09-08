@@ -139,7 +139,7 @@ def inv_fourier_matrix(n):
         for j in range(n):
             theta = t.tensor(2 * t.pi * i * j / (n))
             inv_fourier_matrix[i, j] = t.complex(t.cos(-theta), t.sin(-theta))
-            inv_fourier_matrix *= 1/(n)
+    inv_fourier_matrix *= 1/(n)
     return inv_fourier_matrix
 
 
@@ -217,21 +217,19 @@ class MLP_unchunked(nn.Module):
         plt.savefig(filename)
         plt.close()
 
-
-
-def ablate_other_modes(model, modes, embedding):
-    n = self.vocab_size - 1
-    fourier_modes = get_fourier_modes(self)
-    inv_fourier_matrix = inv_fourier_matrix(n)
-    mask = torch.zeros(n, dtype=torch.float32)
-    # Use scatter_ to place zeros at the specified indices
-    mask.scatter_(0, modes, 1.0).to(t.cfloat)
-    fourier_modes *= mask
-    new_embed = t.matmul(inv_fourier_matrix, fourier_modes)
-    model.embedding = nn.Parameter(new_embed.to(device))
-    return(model)
-
-
+    def ablate_other_modes(self, modes):
+        n = self.vocab_size - 1
+        fourier_modes = self.get_fourier_modes()
+        inv_fourier_mat = inv_fourier_matrix(n)
+        # Create a mask with 1's at specified modes and 0's elsewhere
+        mask = t.zeros(n, dtype=t.float32)
+        mask.scatter_(0, modes, 1.0)
+        # Apply the mask to the Fourier modes
+        fourier_modes *= mask.to(t.cfloat)
+        # Transform back to the spatial domain using the inverse Fourier matrix
+        new_embed = t.matmul(inv_fourier_mat, fourier_modes)
+        # Use only the real part of the result to set as the new embedding weights
+        self.embedding.weight = nn.Parameter(new_embed.real.to(self.embedding.device))
 
 
 def add_embedding_noise(model, circuit_nums, device="cpu"):
