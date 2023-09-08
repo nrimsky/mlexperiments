@@ -1,5 +1,9 @@
 
-from sklearn.decomposition import PCA
+import torch as t
+import torch.nn as nn
+import torch.utils.data as data
+import hashlib
+
 import matplotlib.pyplot as plt
 from generate_movie import (
     plot_embeddings_movie,
@@ -12,8 +16,10 @@ from sympy import primerange
 
 import math
 
+import copy
 
-from mlp_modular import ModuloAdditionDataset
+
+from mlp_modular import ModuloAdditionDataset, test_model
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -94,8 +100,8 @@ class MLP_unchunked(nn.Module):
         plt.close()
 
 
-def sizes(vocab_size, num_sizes = 4): 
-    return [int(vocab_size)^(n/num_sizes) for n in range(1, 2*num_sizes)]
+def fracs(vocab_size, num_datapoints = 8): 
+    return [vocab_size**(-2/num_datapoints) for n in range(1, num_datapoints)]
    
 # model.load_state_dict(t.load("modular_addition.ckpt"))
 
@@ -121,8 +127,12 @@ def train(model,
     test_loader,
     hidden_dim=32,
     embed_dim=16,
-    num_lin_epochs = 10000,
+    num_lin_epochs = 20000,
     reg=0,
+    save_frames = False,
+    save_last_frame = True,
+    suffix = "",
+    freeze_mlp = False,
 ):
     vocab_size = model.vocab_size
     num_epochs = num_lin_epochs//vocab_size
@@ -138,6 +148,9 @@ def train(model,
     frame_n = 0
     for epoch in range(epochs):
         model.train()
+        if freeze_mlp:
+            model.linear1.requires_grad = False
+            model.linear2.requires_grad = False
         train_loss = 0
         for x1, x2, target in train_loader:
             x1, x2, target = x1.to(device), x2.to(device), target.to(device)
@@ -165,11 +178,15 @@ def train(model,
             )
         scheduler.step()
     # t.save(model.state_dict(), "modular_addition.ckpt")
+    if save_last_frame == True:
+        model.project_to_fourier_mode(f"fourier_modes_{suffix}.png")
     return model
 
 
-def frac_test(vocab_size, Adam = True, sequential = False, graph = False, embed_dim = 6,hidden_dim = 18, quadratic = False):
-    original_loder = get_grain_test_loaders(batch_size = 256, train_frac = 1)
+def frac_test(vocab_size, Adam = True, sequential = False, graph = False, embed_dim = 6,hidden_dim = 24, quadratic = False, lr = 0.01, reg = 0):
+    BATCH_SIZE = 128
+    SEED = 42
+    train_loader, test_loader = get_train_test_loaders(vocab_size = vocab_size, batch_size = BATCH_SIZE, train_frac = 0.5)
     original_model =  MLP_unchunked(embed_dim=embed_dim, vocab_size=vocab_size, hidden_dim=hidden_dim)
     if quadratic:
         original_model.silu = nn.Lambda(lambda x: x * x)
@@ -178,15 +195,30 @@ def frac_test(vocab_size, Adam = True, sequential = False, graph = False, embed_
         test_loader,
         hidden_dim=hidden_dim,
         embed_dim=embed_dim,
-        num_lin_epochs = 10000,
-        reg=0,
+        num_lin_epochs = 50000,
+        reg=0.01,
+        save_last_frame = True,
+        suffix = f"vocab_{vocab_size}_e_{embed_dim}_h_{hidden_dim}_main",
     )
 
-    for size in sizes(vocab_size):
+    for frac in fracs(vocab_size, num_datapoints = 8):
+        train_loader, test_loader = get_train_test_loaders(vocab_size = vocab_size, train_frac = frac, batch_size = BATCH_SIZE, randomize=False, seed=SEED)
         model = copy.deepcopy(original_model)
         model.embedding = nn.Parameter(t.randn(vocab_size, embed_dim))
-        optimizer = t.optim.Adam(model.parameters(), lr=0.01)
-        model.linear1.requires_grad = False
-        model.linear2.requires_grad = False
-
+        optimizer = t.optim.Adam(model.parameters(), lr=lr)
+        train(model, 
+            train_loader,
+            test_loader,
+            hidden_dim=32,
+            embed_dim=16,
+            num_lin_epochs = 50000,
+            reg=reg,
+            save_frames = False,
+            save_last_frame = True,
+            freeze_mlp = True,
+            suffix = f"vocab_{vocab_size}_e_{embed_dim}_h_{hidden_dim}_frac_{frac}",
+        )
+        
+if __name__ == "__main__":
+    frac_test(114)
 
