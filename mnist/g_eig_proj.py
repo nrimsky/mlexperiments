@@ -76,7 +76,7 @@ def perturb_in_direction(
     # get opacity 0.5 dataloader
     _, data_loader_05_test = load_mnist_data(patterns_per_num, opacity=0.5)
 
-    t_values = np.linspace(0, 5, 25)
+    t_values = np.linspace(0, 5, 50)
 
     # store results
     acc_results = []
