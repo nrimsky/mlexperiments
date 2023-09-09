@@ -8,10 +8,10 @@ def hessian_eig_gauss_newton(
 ):
     """
     Get eigenvalues and eigenvectors of the Gauss-Newton Hessian for a model trained with cross-entropy loss.
-    $\gnHessian = \expectation[\jacobian^\transpose \outHessian \jacobian]$.
-    $\jacobian = \sfrac{\deriv \supOutput}{\deriv \params}$ is the network's parameter-output Jacobian
-    $\outHessian$ is the Hessian of the loss with respect to the network's outputs, and the expectation is with respect to the empirical distribution.
-    The GNH can be seen as an approximation to $\hessian$ which linearizes the network's parameter-output mapping around the current parameters.
+    $H= \expectation[J^T H J]$.
+    $J is the network's parameter-output Jacobian
+    $H$ is the Hessian of the loss with respect to the network's outputs, and the expectation is with respect to the empirical distribution.
+    The GNH can be seen as an approximation to the Hessian which linearizes the network's parameter-output mapping around the current parameters.
     """
     model = model.to(device)
     model.eval()  # Set to eval mode to avoid unnecessary updates
@@ -29,12 +29,14 @@ def hessian_eig_gauss_newton(
     model.zero_grad()
     outputs = model(subset_images)
 
+    # Compute the Jacobian
     jacobian_elems = []
     for j in range(outputs.shape[1]):
         grad_params = grad(outputs[:, j].sum(), model.parameters(), retain_graph=True)
         jacobian_elems.append(t.cat([g.view(-1) for g in grad_params]))
     jacobian = t.stack(jacobian_elems, dim=0)
 
+    # H for cross-entropy loss
     softmax_outputs = t.softmax(outputs, dim=1)
     batch_size, num_classes = softmax_outputs.shape
     I = t.eye(num_classes).to(device)
@@ -47,6 +49,7 @@ def hessian_eig_gauss_newton(
         + (1 - I).unsqueeze(0) * out_hessian_off_diags
     )
 
+    # Compute the Gauss-Newton Hessian
     E_JtHJ = t.einsum(
         "bni,bnn,bnj->ij", jacobian.unsqueeze(0), out_hessians, jacobian.unsqueeze(0)
     )
@@ -60,6 +63,7 @@ def hessian_eig_gauss_newton(
     eigenvalues = eigenvalues[idx]
     eigenvectors = eigenvectors[:, idx]
 
+    # Print some statistics
     print("\n".join("{:.2f}".format(e) for e in eigenvalues[-n_top_vectors:]))
     for threshold in [0.1, 1, 2, 10]:
         tot = (eigenvalues > threshold).sum()
