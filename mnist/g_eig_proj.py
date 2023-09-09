@@ -22,7 +22,7 @@ def perturb_in_direction(
     fname,
     patterns_per_num,
     direction,
-    n_p=50,
+    n_p=10,
     just_return_proj_v=False,
     make_movie=False,
 ):
@@ -76,7 +76,7 @@ def perturb_in_direction(
     # get opacity 0.5 dataloader
     _, data_loader_05_test = load_mnist_data(patterns_per_num, opacity=0.5)
 
-    t_values = np.linspace(0, 5, 50)
+    t_values = np.linspace(0, 2, 25)
 
     # store results
     acc_results = []
