@@ -110,12 +110,10 @@ class CNN(t.nn.Module):
     """
     def __init__(self, input_size, hidden_channels=6, output_channels=6, kernel_size=3, stride=1, padding=1, n_classes=10):
         super(CNN, self).__init__()
-        self.conv1 = t.nn.Sequential(t.nn.Conv2d(1, hidden_channels, kernel_size, stride, padding),
-                                     t.nn.SiLU(),
-                                     t.nn.MaxPool2d(2))
-        self.conv2 = t.nn.Sequential(t.nn.Conv2d(hidden_channels, output_channels, kernel_size, stride, padding),
-                                     t.nn.SiLU(),
-                                     t.nn.MaxPool2d(2))
+        self.conv1 = t.nn.Conv2d(1, hidden_channels, kernel_size, stride, padding)
+        self.conv2 = t.nn.Conv2d(hidden_channels, output_channels, kernel_size, stride, padding)
+        self.maxpool1 = t.nn.MaxPool2d(2)
+        self.maxpool2 = t.nn.MaxPool2d(2)
         self.output_size = (input_size - kernel_size + 2 * padding) // stride + 1
         self.output_size = self.output_size // 2
         self.output_size = (self.output_size - kernel_size + 2 * padding) // stride + 1
@@ -125,20 +123,16 @@ class CNN(t.nn.Module):
         self.fc1 = t.nn.Linear(self.linear_input_size, n_classes)
         self.fc2 = t.nn.Linear(n_classes, n_classes)
         self.relu = t.nn.ReLU()
-
-        self.fc_1_act = None
-        self.conv_1_act = None
-        self.conv_2_act = None
-
-        t.nn.init.zeros_(self.fc1.weight)
-        t.nn.init.zeros_(self.fc2.weight)
-        t.nn.init.zeros_(self.conv1[0].weight)
-        t.nn.init.zeros_(self.conv2[0].weight)
+        self.silu = t.nn.SiLU()
 
     def forward(self, x):
         x = self.conv1(x)
+        x = self.silu(x)
+        x = self.maxpool1(x)
         self.conv_1_act = x
         x = self.conv2(x)
+        x = self.silu(x)
+        x = self.maxpool2(x)
         self.conv_2_act = x
         x = x.view(-1, self.linear_input_size)
         x = self.fc1(x)
@@ -179,7 +173,8 @@ def train_single(data_loader_train, model, criterion, filename, n_epochs, initia
         if print_pure:
             test_on_pure_number_patterns(filename, patterns_per_num)
     t.save(model.state_dict(), filename)
-    make_conv_movies()
+    if make_movie:
+        make_conv_movies()
 
 
 def train(patterns_per_num, opacities, n_epochs=5, initial_lr=0.01, lr_decay=0.7, print_pure=False):
@@ -322,18 +317,10 @@ def train_direct_opacity_05(patterns_per_num, suffix = "", n_epochs = 20):
 
 
 if __name__ == "__main__":
-    # experiment(patterns_per_num=10)
-    # finetune_final_step(patterns_per_num=10)
-    # model = CNN(input_size=28)
-    # model.load_state_dict(t.load('./model_final_finetuned.ckpt'))
-    # model.eval()
-    # model.cuda()
-    # test_pure_and_opacity(model, 10, device="cuda")
-    data_train = CustomMNIST(10, 0.0, is_train=True, proportion_just_pattern=0.0, proportion_unchanged=0.0)
-    data_loader_train = DataLoader(dataset=data_train,
-                                                batch_size=64,
-                                                shuffle=True)
+    train_direct_opacity_05(patterns_per_num=10, n_epochs=10)
+    finetune_final_step(patterns_per_num=10, model_dir = "./model_direct_0.5.ckpt", save_dir="./model_final_finetuned.ckpt")
     model = CNN(input_size=28)
-    criterion = t.nn.CrossEntropyLoss()
-    model.train()
-    train_single(data_loader_train, model, criterion, f"./model_new.ckpt", n_epochs=3, initial_lr=0.01, lr_decay=0.95, print_pure=True, patterns_per_num=10, make_movie=True)
+    model.load_state_dict(t.load('./model_final_finetuned.ckpt'))
+    model.eval()
+    model.cuda()
+    test_pure_and_opacity(model, 10, device="cuda")
