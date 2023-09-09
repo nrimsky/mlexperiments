@@ -142,8 +142,8 @@ def perturb_in_direction(
     plot_pertubation_results(
         loss_results, f"perturbation_loss_results_{direction}.png", yaxis="Loss"
     )
-
-    make_conv_movies()
+    if make_movie:
+        make_conv_movies()
 
 
 def get_hessian_eig_mnist(
