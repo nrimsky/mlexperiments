@@ -290,7 +290,7 @@ def test_all():
 def experiment(make_new_patterns = False, patterns_per_num=10):
     if make_new_patterns:
         make_patterns()
-    opacities = [0.0, 0.2, 0.4, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0]
+    opacities = [0.0, 0.4, 0.8, 1.0]
     train(patterns_per_num=patterns_per_num, opacities=opacities)
 
 def experiment_vary_complexity(make_new_patterns = False):
@@ -317,8 +317,8 @@ def train_direct_opacity_05(patterns_per_num, suffix = "", n_epochs = 20):
 
 
 if __name__ == "__main__":
-    train_direct_opacity_05(patterns_per_num=10, n_epochs=10)
-    finetune_final_step(patterns_per_num=10, model_dir = "./model_direct_0.5.ckpt", save_dir="./model_final_finetuned.ckpt")
+    experiment()
+    finetune_final_step(patterns_per_num=10, model_dir = "./model_1.0.ckpt", save_dir="./model_final_finetuned.ckpt")
     model = CNN(input_size=28)
     model.load_state_dict(t.load('./model_final_finetuned.ckpt'))
     model.eval()
