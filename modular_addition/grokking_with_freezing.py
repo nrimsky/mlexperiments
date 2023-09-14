@@ -19,10 +19,25 @@ import math
 import copy
 
 
-from mlp_modular import ModuloAdditionDataset, test_model
+from mlp_modular import test_model
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+class ModuloAdditionDataset(data.Dataset):
+    def __init__(self, d_vocab=114, seed = 42):
+        super().__init__()
+        self.d_vocab = d_vocab
+        self.eq_token = d_vocab - 1  # assuming '=' is the last token in the vocabulary
+
+    def __len__(self):
+        return (self.d_vocab - 1) ** 2
+
+    def __getitem__(self, idx):
+        a = idx // (self.d_vocab - 1)
+        b = idx % (self.d_vocab - 1)
+        res = (a + b) % (self.d_vocab - 1)
+        return a, b, res
 
 
 class MLP_unchunked(nn.Module):
@@ -30,7 +45,8 @@ class MLP_unchunked(nn.Module):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, embed_dim)
         self.linear1 = nn.Linear(embed_dim, hidden_dim, bias=False)
-        self.linear2 = nn.Linear(hidden_dim, vocab_size, bias=False)
+        self.linear2 = nn.Linear(hidden_dim, embed_dim, bias=False)
+        self.unembed = nn.Linear(embed_dim, vocab_size, bias=False)
         self.silu = nn.SiLU()
         self.vocab_size = vocab_size
 
@@ -42,6 +58,7 @@ class MLP_unchunked(nn.Module):
         x = x1 + x2
         x = self.silu(x)
         x = self.linear2(x)
+        x = self.unembed(x)
         return x
 
     def get_fourier_modes(self):
@@ -100,12 +117,12 @@ class MLP_unchunked(nn.Module):
         plt.close()
 
 
-def fracs(vocab_size, num_datapoints = 8): 
-    return [vocab_size**(-2/num_datapoints) for n in range(1, num_datapoints)]
+def fracs(vocab_size, num_datapoints = 10): 
+    return [vocab_size**(-2*n/num_datapoints) for n in range(1, num_datapoints)]
    
 # model.load_state_dict(t.load("modular_addition.ckpt"))
 
-def get_train_test_loaders(train_frac, batch_size, vocab_size, randomize=False, seed=42):
+def get_train_test_loaders(train_frac, batch_size, vocab_size, randomize=False, seed=42, sequential = False):
     if randomize:
         dataset = RandomOperationDataset(vocab_size)
     else:
@@ -113,6 +130,12 @@ def get_train_test_loaders(train_frac, batch_size, vocab_size, randomize=False, 
     total_length = len(dataset)
     train_length = int(total_length * train_frac)
     test_length = total_length - train_length
+    if sequential:
+            train_dataset, test_dataset = data.split(
+                dataset, [train_length, test_length], generator=generator
+            )
+
+
     generator = t.Generator().manual_seed(seed)  # Seed for reproducibility
 
     train_dataset, test_dataset = data.random_split(
@@ -133,12 +156,14 @@ def train(model,
     save_last_frame = True,
     suffix = "",
     freeze_mlp = False,
+    freeze_first = False,
+    lr=0.01,
 ):
     vocab_size = model.vocab_size
     num_epochs = num_lin_epochs//vocab_size
     print(f"Number of parameters: {count_parameters(model)}")
     # optimizer = t.optim.AdamW(model.parameters(), lr=0.01, weight_decay=0.0)
-    optimizer = t.optim.Adam(model.parameters(), lr=0.01, weight_decay=0.0)
+    optimizer = t.optim.Adam(model.parameters(), lr=lr, weight_decay=0.0)
     scheduler = t.optim.lr_scheduler.ExponentialLR(optimizer, gamma=1)
     criterion = nn.CrossEntropyLoss()
     epochs = num_epochs
@@ -151,6 +176,8 @@ def train(model,
         if freeze_mlp:
             model.linear1.weight.requires_grad = False
             model.linear2.weight.requires_grad = False
+        if freeze_first:
+            model.linear1.weight.requires_grad = False
         train_loss = 0
         for x1, x2, target in train_loader:
             x1, x2, target = x1.to(device), x2.to(device), target.to(device)
@@ -183,7 +210,20 @@ def train(model,
     return model
 
 
-def frac_test(vocab_size, Adam = True, sequential = False, graph = False, embed_dim = 6,hidden_dim = 24, quadratic = False, lr = 0.01, reg = 0):
+def frac_test(
+    vocab_size, 
+    Adam = True, 
+    sequential = False, 
+    graph = False, 
+    embed_dim = 6,
+    hidden_dim = 48, 
+    quadratic = False, 
+    lr = 0.005, 
+    reg_orig = 0.005, 
+    reg = 0.005, 
+    num_datapoints = 18,
+    num_lin_epochs = 500000,
+):
     BATCH_SIZE = 128
     SEED = 42
     train_loader, test_loader = get_train_test_loaders(vocab_size = vocab_size, batch_size = BATCH_SIZE, train_frac = 0.5)
@@ -195,13 +235,15 @@ def frac_test(vocab_size, Adam = True, sequential = False, graph = False, embed_
         test_loader,
         hidden_dim=hidden_dim,
         embed_dim=embed_dim,
-        num_lin_epochs = 50000,
-        reg=0.00,
+        num_lin_epochs = num_lin_epochs,
+        reg=reg_orig,
+        lr = lr,
         save_last_frame = True,
         suffix = f"vocab_{vocab_size}_e_{embed_dim}_h_{hidden_dim}_main",
     )
 
-    for frac in fracs(vocab_size, num_datapoints = 8):
+    for frac in fracs(vocab_size, num_datapoints = num_datapoints):
+        print(f"frac {frac}")
         train_loader, test_loader = get_train_test_loaders(vocab_size = vocab_size, train_frac = frac, batch_size = BATCH_SIZE, randomize=False, seed=SEED)
         model = copy.deepcopy(original_model)
         model.embedding = nn.Embedding(vocab_size, embed_dim)
@@ -209,16 +251,49 @@ def frac_test(vocab_size, Adam = True, sequential = False, graph = False, embed_
         train(model, 
             train_loader,
             test_loader,
-            hidden_dim=32,
-            embed_dim=16,
-            num_lin_epochs = 50000,
+            hidden_dim=hidden_dim,
+            embed_dim=embed_dim,
+            num_lin_epochs = num_lin_epochs,
             reg=reg,
+            lr = lr,
             save_frames = False,
             save_last_frame = True,
             freeze_mlp = True,
             suffix = f"vocab_{vocab_size}_e_{embed_dim}_h_{hidden_dim}_frac_{frac}",
         )
-        
+
+
+VOCAB_SIZE = 114
+TRAIN_FRAC = 0.5
+BATCH_SIZE = 128
+SEED = 42 
+TRAIN_LOADER, TEST_LOADER = get_train_test_loaders(vocab_size = VOCAB_SIZE, train_frac = TRAIN_FRAC, batch_size = BATCH_SIZE, randomize=False, seed=SEED)
+HIDDEN_DIM=42
+EMBED_DIM=16
+MODEL =  MLP_unchunked(embed_dim=EMBED_DIM, vocab_size=VOCAB_SIZE, hidden_dim=HIDDEN_DIM)
+NUM_LIN_EPOCHS = 20000
+REG=0
+save_frames = False
+save_last_frame = True
+suffix = ""
+LR=0.01
+
 if __name__ == "__main__":
-    frac_test(114)
+    train(
+        model = MODEL, 
+        train_loader = TRAIN_LOADER, 
+        test_loader = TEST_LOADER,
+        hidden_dim = HIDDEN_DIM, 
+        embed_dim = EMBED_DIM, 
+        num_lin_epochs = NUM_LIN_EPOCHS,
+        reg = REG,
+        save_last_frame = True,
+        save_frames = False,
+        suffix = "",
+        freeze_first = True,
+        lr = LR,
+    )
+
+
+
 
