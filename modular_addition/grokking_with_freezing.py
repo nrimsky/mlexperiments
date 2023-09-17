@@ -12,7 +12,7 @@ from generate_movie import (
 )
 from itertools import combinations
 from utils import get_weight_norm
-from sympy import primerange
+from sympy import primerange, isprime
 
 import math
 
@@ -23,6 +23,16 @@ from mlp_modular import test_model
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
+class Lambda(nn.Module):
+    def __init__(self, func):
+        super().__init__()
+        self.func = func
+
+    def forward(self, x):
+        return self.func(x)
+
 
 class ModuloAdditionDataset(data.Dataset):
     def __init__(self, d_vocab=114, seed = 42):
@@ -41,20 +51,26 @@ class ModuloAdditionDataset(data.Dataset):
 
 
 class MLP_unchunked(nn.Module):
-    def __init__(self, embed_dim, vocab_size, hidden_dim):
+    def __init__(self, embed_dim, vocab_size, hidden_dim, asymmetric = False, quadratic = False):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, embed_dim)
         self.linear1 = nn.Linear(embed_dim, hidden_dim, bias=False)
+        if asymmetric:
+            self.linear1r = nn.Linear(embed_dim, hidden_dim, bias=False)
+        else:
+            self.linear1r = self.linear1
         self.linear2 = nn.Linear(hidden_dim, embed_dim, bias=False)
         self.unembed = nn.Linear(embed_dim, vocab_size, bias=False)
         self.silu = nn.SiLU()
+        if quadratic:
+            self.silu = Lambda(lambda x: x * x)
         self.vocab_size = vocab_size
 
     def forward(self, x1, x2):
         x1 = self.embedding(x1)
         x2 = self.embedding(x2)
         x1 = self.linear1(x1)
-        x2 = self.linear1(x2)
+        x2 = self.linear1r(x2)
         x = x1 + x2
         x = self.silu(x)
         x = self.linear2(x)
@@ -117,6 +133,18 @@ class MLP_unchunked(nn.Module):
         plt.close()
 
 
+class MLP_theory(MLP_unchunked):
+    def __init__(self, embed_dim, vocab_size, hidden_dim):
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size, embed_dim)
+        self.linear1 = nn.Linear(embed_dim, hidden_dim, bias=False)
+        self.linear2 = nn.Linear(hidden_dim, embed_dim, bias=False)
+        self.unembed = nn.Linear(embed_dim, vocab_size, bias=False)
+        self.silu = nn.SiLU()
+        self.vocab_size = vocab_size
+
+
+
 def fracs(vocab_size, num_datapoints = 10): 
     return [vocab_size**(-2*n/num_datapoints) for n in range(1, num_datapoints)]
    
@@ -154,16 +182,21 @@ def train(model,
     reg=0,
     save_frames = False,
     save_last_frame = True,
+    record_loss = False,
     suffix = "",
     freeze_mlp = False,
     freeze_first = False,
+    sgd = False,
     lr=0.01,
 ):
     vocab_size = model.vocab_size
     num_epochs = num_lin_epochs//vocab_size
     print(f"Number of parameters: {count_parameters(model)}")
     # optimizer = t.optim.AdamW(model.parameters(), lr=0.01, weight_decay=0.0)
-    optimizer = t.optim.Adam(model.parameters(), lr=lr, weight_decay=0.0)
+    if sgd:
+        optimizer = t.optim.SGD(model.parameters(), lr=lr, weight_decay=0.0)
+    else:
+        optimizer = t.optim.Adam(model.parameters(), lr=lr, weight_decay=0.0)        
     scheduler = t.optim.lr_scheduler.ExponentialLR(optimizer, gamma=1)
     criterion = nn.CrossEntropyLoss()
     epochs = num_epochs
@@ -171,6 +204,7 @@ def train(model,
     model.to(device)
     step = 0
     frame_n = 0
+    final_acc = 0
     for epoch in range(epochs):
         model.train()
         if freeze_mlp:
@@ -199,12 +233,15 @@ def train(model,
         model.eval()
         if epoch % 50 == 0:
             val_loss, val_acc = test_model(model, test_loader, device, criterion)
+            final_acc = val_acc
             train_loss, train_acc = test_model(model, train_loader, device, criterion)
             print(
                 f"Epoch {epoch}: train loss: {float(train_loss)}, train accuracy: {float(train_acc)}, val loss: {float(val_loss)}, val accuracy: {float(val_acc)}"
             )
         scheduler.step()
     # t.save(model.state_dict(), "modular_addition.ckpt")
+    if record_loss == True:
+        suffix += f"val_acc_{final_acc:.2f}"
     if save_last_frame == True:
         model.project_to_fourier_mode(f"fourier_modes_{suffix}.png")
     return model
@@ -264,36 +301,398 @@ def frac_test(
 
 
 VOCAB_SIZE = 114
-TRAIN_FRAC = 0.5
+TRAIN_FRAC = 0.9
 BATCH_SIZE = 128
 SEED = 42 
 TRAIN_LOADER, TEST_LOADER = get_train_test_loaders(vocab_size = VOCAB_SIZE, train_frac = TRAIN_FRAC, batch_size = BATCH_SIZE, randomize=False, seed=SEED)
-HIDDEN_DIM=42
-EMBED_DIM=16
+HIDDEN_DIM=60
+EMBED_DIM=6
 MODEL =  MLP_unchunked(embed_dim=EMBED_DIM, vocab_size=VOCAB_SIZE, hidden_dim=HIDDEN_DIM)
-NUM_LIN_EPOCHS = 20000
+NUM_LIN_EPOCHS = 100000 #300000
+QUADRATIC = True
+ASYMMETRIC = True
+
 REG=0
 save_frames = False
 save_last_frame = True
 suffix = ""
-LR=0.01
+LR=0.03
+
+def nextprime(x):
+    n = int(x)
+    if n > 2*x+3:
+        return False
+    while not isprime(n):
+        n += 1
+    return n
+
+
+def quad_exp():
+    VOCAB_SIZE = 114
+    TRAIN_FRAC = 0.9
+    BATCH_SIZE = 128
+    SEED = 42 
+    TRAIN_LOADER, TEST_LOADER = get_train_test_loaders(vocab_size = VOCAB_SIZE, train_frac = TRAIN_FRAC, batch_size = BATCH_SIZE, randomize=False, seed=SEED)
+    HIDDEN_DIM=60
+    EMBED_DIM=6
+    MODEL =  MLP_unchunked(embed_dim=EMBED_DIM, vocab_size=VOCAB_SIZE, hidden_dim=HIDDEN_DIM)
+    NUM_LIN_EPOCHS = 100000 #300000
+    QUADRATIC = True
+    ASYMMETRIC = True    
+    for n in range(10,16):
+        for i in range(1):
+            vocab_size = nextprime(int(10**(1 + n/10)))+1
+            model = MLP_unchunked(embed_dim=EMBED_DIM, vocab_size=vocab_size, hidden_dim=HIDDEN_DIM, asymmetric = ASYMMETRIC, quadratic = QUADRATIC)
+            frac = vocab_size**(-0.1)
+            print(f"frac = {frac}, vocab_size = {vocab_size}")
+            TRAIN_LOADER, TEST_LOADER = get_train_test_loaders(vocab_size = vocab_size, train_frac = frac, batch_size = BATCH_SIZE, randomize=False, seed=SEED)
+            train(
+                model = model, 
+                train_loader = TRAIN_LOADER, 
+                test_loader = TEST_LOADER,
+                hidden_dim = HIDDEN_DIM, 
+                embed_dim = EMBED_DIM, 
+                num_lin_epochs = NUM_LIN_EPOCHS,
+                reg = REG,
+                save_last_frame = True,
+                save_frames = False,
+                suffix = f"frac_{frac}_prime_{vocab_size-1}",
+                record_loss = True,
+                freeze_first = True,
+                lr = LR,
+            )
+
+""" 
+    discussion of quad_sgd_exp(): stops working around p = 251 or so. Probably need lower lr? Or higher training frac? 
+    note that even for small primes, training_frac needs to be high-ish.
+"""
+
+def phase_trans_search():
+    VOCAB_SIZE = 114
+    TRAIN_FRAC = 0.9
+    BATCH_SIZE = 128
+    SEED = 42 
+    TRAIN_LOADER, TEST_LOADER = get_train_test_loaders(vocab_size = VOCAB_SIZE, train_frac = TRAIN_FRAC, batch_size = BATCH_SIZE, randomize=False, seed=SEED)
+    HIDDEN_DIM=60
+    EMBED_DIM=6
+    MODEL =  MLP_unchunked(embed_dim=EMBED_DIM, vocab_size=VOCAB_SIZE, hidden_dim=HIDDEN_DIM)
+    NUM_LIN_EPOCHS = 100000 #300000
+    QUADRATIC = True
+    ASYMMETRIC = True
+    REG=0
+    save_frames = False
+    save_last_frame = True
+    suffix = ""
+    LR=0.03
+
+    for n in range(10,20):
+        for i in range(6):
+            vocab_size = nextprime(int(10**(1 + n/10)))+1
+            model = MLP_unchunked(embed_dim=EMBED_DIM, vocab_size=vocab_size, hidden_dim=HIDDEN_DIM, asymmetric = ASYMMETRIC, quadratic = QUADRATIC)
+            frac = vocab_size**(-0.4-0.02*i)
+            print(f"frac = {frac}, vocab_size = {vocab_size}")
+            TRAIN_LOADER, TEST_LOADER = get_train_test_loaders(vocab_size = vocab_size, train_frac = frac, batch_size = BATCH_SIZE, randomize=False, seed=SEED)
+            train(
+                model = model, 
+                train_loader = TRAIN_LOADER, 
+                test_loader = TEST_LOADER,
+                hidden_dim = HIDDEN_DIM, 
+                embed_dim = EMBED_DIM, 
+                num_lin_epochs = NUM_LIN_EPOCHS,
+                reg = REG,
+                save_last_frame = True,
+                save_frames = False,
+                suffix = f"frac_{frac}_prime_{vocab_size-1}",
+                record_loss = True,
+                freeze_first = True,
+                lr = LR,
+            )
+"""
+    comments: 
+    *clear phase transition behavior around training frac 1/(vocab_size**0.5)
+        *however, since I'm only searching along a factor of 10 or so, exponentials can be obscured by log or even constant factors:
+            I expect something like this is going on to some extent
+        *interesting questions are: 
+            *how does this epend on embed_dim?
+            *how does this depend on hyperparameters like lr, number of epochs, etc.?
+    *weirdly, the model with these parameters works until 631, then starts breaking at 797, then is fully broken at 1009.
+        *this could be an issue with lr? Or alternatively a computer issue? 
+"""
+def phase_search_large_embed():
+    VOCAB_SIZE = 114
+    TRAIN_FRAC = 0.9
+    BATCH_SIZE = 128
+    SEED = 42 
+    TRAIN_LOADER, TEST_LOADER = get_train_test_loaders(vocab_size = VOCAB_SIZE, train_frac = TRAIN_FRAC, batch_size = BATCH_SIZE, randomize=False, seed=SEED)
+    HIDDEN_DIM=100
+    EMBED_DIM=50
+    MODEL =  MLP_unchunked(embed_dim=EMBED_DIM, vocab_size=VOCAB_SIZE, hidden_dim=HIDDEN_DIM)
+    NUM_LIN_EPOCHS = 100000 #300000
+    QUADRATIC = True
+    ASYMMETRIC = True
+    REG=0
+    save_frames = False
+    save_last_frame = True
+    suffix = ""
+    LR=0.03
+
+    for n in range(10,20):
+        for i in range(6):
+            vocab_size = nextprime(int(10**(1 + n/10)))+1
+            model = MLP_unchunked(embed_dim=EMBED_DIM, vocab_size=vocab_size, hidden_dim=HIDDEN_DIM, asymmetric = ASYMMETRIC, quadratic = QUADRATIC)
+            frac = vocab_size**(-0.3-0.04*i)
+            print(f"frac = {frac}, vocab_size = {vocab_size}")
+            TRAIN_LOADER, TEST_LOADER = get_train_test_loaders(vocab_size = vocab_size, train_frac = frac, batch_size = BATCH_SIZE, randomize=False, seed=SEED)
+            train(
+                model = model, 
+                train_loader = TRAIN_LOADER, 
+                test_loader = TEST_LOADER,
+                hidden_dim = HIDDEN_DIM, 
+                embed_dim = EMBED_DIM, 
+                num_lin_epochs = NUM_LIN_EPOCHS,
+                reg = REG,
+                save_last_frame = True,
+                save_frames = False,
+                suffix = f"frac_{frac}_prime_{vocab_size-1}",
+                record_loss = True,
+                freeze_first = True,
+                lr = LR,
+            )
+"""
+    comments: 
+        *weirdly, seems to be more random than with small embed_dim
+        *phase transition still around 1/p^0.5, but more random
+        *with these params, clear issues with lr for p = 251 and higher (like, loss sometimes goes up drastically)
+        *sometimes works for p = 251 or 317 but fully breaks for high p.
+"""
+
+
+def large_embed():
+    VOCAB_SIZE = 114
+    TRAIN_FRAC = 0.9
+    BATCH_SIZE = 128
+    SEED = 42 
+    TRAIN_LOADER, TEST_LOADER = get_train_test_loaders(vocab_size = VOCAB_SIZE, train_frac = TRAIN_FRAC, batch_size = BATCH_SIZE, randomize=False, seed=SEED)
+    HIDDEN_DIM=100
+    EMBED_DIM=50
+    MODEL =  MLP_unchunked(embed_dim=EMBED_DIM, vocab_size=VOCAB_SIZE, hidden_dim=HIDDEN_DIM)
+    NUM_LIN_EPOCHS = 100000 #300000
+    QUADRATIC = True
+    ASYMMETRIC = True
+    REG=0
+    save_frames = False
+    save_last_frame = True
+    suffix = ""
+    LR=0.03
+
+    for n in range(10,20):
+        for i in range(1):
+            vocab_size = nextprime(int(10**(1 + n/10)))+1
+            model = MLP_unchunked(embed_dim=EMBED_DIM, vocab_size=vocab_size, hidden_dim=HIDDEN_DIM, asymmetric = ASYMMETRIC, quadratic = QUADRATIC)
+            frac = 0.4
+            print(f"frac = {frac}, vocab_size = {vocab_size}")
+            TRAIN_LOADER, TEST_LOADER = get_train_test_loaders(vocab_size = vocab_size, train_frac = frac, batch_size = BATCH_SIZE, randomize=False, seed=SEED)
+            train(
+                model = model, 
+                train_loader = TRAIN_LOADER, 
+                test_loader = TEST_LOADER,
+                hidden_dim = HIDDEN_DIM, 
+                embed_dim = EMBED_DIM, 
+                num_lin_epochs = NUM_LIN_EPOCHS,
+                reg = REG,
+                save_last_frame = True,
+                save_frames = False,
+                suffix = f"frac_{frac}_prime_{vocab_size-1}",
+                record_loss = True,
+                freeze_first = True,
+                lr = LR,
+            )
+"""
+    comments: 
+    *This mostly works great! Sometimes breaks for large p (order of 200-300), probably for LR reasons.
+    *
+"""
+
+def sgd_embed_small_lr():
+    VOCAB_SIZE = 114
+    TRAIN_FRAC = 0.9
+    BATCH_SIZE = 128
+    SEED = 42 
+    TRAIN_LOADER, TEST_LOADER = get_train_test_loaders(vocab_size = VOCAB_SIZE, train_frac = TRAIN_FRAC, batch_size = BATCH_SIZE, randomize=False, seed=SEED)
+    HIDDEN_DIM=200
+    EMBED_DIM=200
+    MODEL =  MLP_unchunked(embed_dim=EMBED_DIM, vocab_size=VOCAB_SIZE, hidden_dim=HIDDEN_DIM)
+    NUM_LIN_EPOCHS = 1000000 
+    QUADRATIC = True
+    ASYMMETRIC = True
+    REG=0
+    save_frames = False
+    save_last_frame = True
+    suffix = ""
+    LR=0.001
+
+    for n in range(10,20):
+        for i in range(1):
+            vocab_size = nextprime(int(10**(1 + n/10)))+1
+            model = MLP_unchunked(embed_dim=EMBED_DIM, vocab_size=vocab_size, hidden_dim=HIDDEN_DIM, asymmetric = ASYMMETRIC, quadratic = QUADRATIC)
+            frac = 0.4
+            print(f"frac = {frac}, vocab_size = {vocab_size}")
+            TRAIN_LOADER, TEST_LOADER = get_train_test_loaders(vocab_size = vocab_size, train_frac = frac, batch_size = BATCH_SIZE, randomize=False, seed=SEED)
+            train(
+                model = model, 
+                train_loader = TRAIN_LOADER, 
+                test_loader = TEST_LOADER,
+                hidden_dim = HIDDEN_DIM, 
+                embed_dim = EMBED_DIM, 
+                num_lin_epochs = NUM_LIN_EPOCHS,
+                reg = REG,
+                save_last_frame = True,
+                save_frames = False,
+                suffix = f"frac_{frac}_prime_{vocab_size-1}",
+                record_loss = True,
+                freeze_first = True,
+                lr = LR,
+            )
+"""
+    notes:
+    *it works well with large LR, and just doesn't work at all with tiny LR. Making me think that bootstrap phenomena are involved.
+"""
+
+def check_bootstrap():
+    VOCAB_SIZE = 114
+    TRAIN_FRAC = 0.9
+    BATCH_SIZE = 128
+    SEED = 42 
+    TRAIN_LOADER, TEST_LOADER = get_train_test_loaders(vocab_size = VOCAB_SIZE, train_frac = TRAIN_FRAC, batch_size = BATCH_SIZE, randomize=False, seed=SEED)
+    HIDDEN_DIM=40
+    EMBED_DIM=6
+    MODEL =  MLP_unchunked(embed_dim=EMBED_DIM, vocab_size=VOCAB_SIZE, hidden_dim=HIDDEN_DIM)
+    NUM_LIN_EPOCHS = 1000000 
+    QUADRATIC = True
+    ASYMMETRIC = True
+    REG=0
+    save_frames = False
+    save_last_frame = True
+    suffix = ""
+    LR=0.00005
+
+    for n in range(10,20):
+        for i in range(1):
+            vocab_size = nextprime(int(10**(1 + n/10)))+1
+            model = MLP_unchunked(embed_dim=EMBED_DIM, vocab_size=vocab_size, hidden_dim=HIDDEN_DIM, asymmetric = ASYMMETRIC, quadratic = QUADRATIC)
+            frac = 0.4
+            print(f"frac = {frac}, vocab_size = {vocab_size}")
+            TRAIN_LOADER, TEST_LOADER = get_train_test_loaders(vocab_size = vocab_size, train_frac = frac, batch_size = BATCH_SIZE, randomize=False, seed=SEED)
+            train(
+                model = model, 
+                train_loader = TRAIN_LOADER, 
+                test_loader = TEST_LOADER,
+                hidden_dim = HIDDEN_DIM, 
+                embed_dim = EMBED_DIM, 
+                num_lin_epochs = NUM_LIN_EPOCHS,
+                reg = REG,
+                save_last_frame = True,
+                save_frames = False,
+                suffix = f"frac_{frac}_prime_{vocab_size-1}",
+                record_loss = True,
+                freeze_first = True,
+                lr = LR,
+            )
+
+"""notes:
+    *Here the network is somewhat underparametrized
+    *We see pretty definitively that it groks without bootstrap/sgd randomness issues, because the lr is so freakin tiny
+"""
+
+
+def check_bootstrap_and_embed_dim(sgd=False):
+    VOCAB_SIZE = 114
+    TRAIN_FRAC = 0.9
+    BATCH_SIZE = 128
+    SEED = 42 
+    TRAIN_LOADER, TEST_LOADER = get_train_test_loaders(vocab_size = VOCAB_SIZE, train_frac = TRAIN_FRAC, batch_size = BATCH_SIZE, randomize=False, seed=SEED)
+    HIDDEN_DIM=40
+    EMBED_DIM=6
+    # MODEL =  MLP_unchunked(embed_dim=embed_dim, vocab_size=VOCAB_SIZE, hidden_dim=hidden_dim)
+    NUM_LIN_EPOCHS = 300000
+    QUADRATIC = True
+    ASYMMETRIC = True
+    REG=0
+    save_frames = False
+    save_last_frame = True
+    suffix = ""
+    LR=0.001
+    for i in range(4,30):
+        vocab_size = 114
+        embed_dim=i
+        print(f"embed_dim={embed_dim}")
+        hidden_dim = 60
+        model = MLP_unchunked(embed_dim=embed_dim, vocab_size=vocab_size, hidden_dim=hidden_dim, asymmetric = ASYMMETRIC, quadratic = QUADRATIC)
+        frac = 0.4
+        print(f"frac = {frac}, vocab_size = {vocab_size}")
+        TRAIN_LOADER, TEST_LOADER = get_train_test_loaders(vocab_size = vocab_size, train_frac = frac, batch_size = BATCH_SIZE, randomize=False, seed=SEED)
+        train(
+            model = model, 
+            train_loader = TRAIN_LOADER, 
+            test_loader = TEST_LOADER,
+            hidden_dim = hidden_dim, 
+            embed_dim = embed_dim, 
+            num_lin_epochs = NUM_LIN_EPOCHS,
+            reg = REG,
+            save_last_frame = True,
+            save_frames = False,
+            suffix = f"frac_{frac}_prime_{vocab_size-1}_embed_{embed_dim}",
+            record_loss = True,
+            freeze_first = True,
+            lr = LR,
+            sgd = sgd
+        )
+
+def check_sgd_with_bootstrap_lr():
+    VOCAB_SIZE = 114
+    TRAIN_FRAC = 0.9
+    BATCH_SIZE = 128
+    SEED = 42 
+    TRAIN_LOADER, TEST_LOADER = get_train_test_loaders(vocab_size = VOCAB_SIZE, train_frac = TRAIN_FRAC, batch_size = BATCH_SIZE, randomize=False, seed=SEED)
+    HIDDEN_DIM=50
+    EMBED_DIM=6
+    MODEL =  MLP_unchunked(embed_dim=EMBED_DIM, vocab_size=VOCAB_SIZE, hidden_dim=HIDDEN_DIM)
+    NUM_LIN_EPOCHS = 100000 
+    QUADRATIC = True
+    ASYMMETRIC = True
+    REG=0
+    save_frames = False
+    save_last_frame = True
+    suffix = ""
+    LR=0.01
+    SGD = True
+
+    for n in range(1,12):
+        for i in range(1):
+            lr = 10**(-n/3)
+            vocab_size = 114
+            model = MLP_unchunked(embed_dim=EMBED_DIM, vocab_size=vocab_size, hidden_dim=HIDDEN_DIM, asymmetric = ASYMMETRIC, quadratic = QUADRATIC)
+            frac = 0.4
+            print(f"frac = {frac}, vocab_size = {vocab_size}")
+            TRAIN_LOADER, TEST_LOADER = get_train_test_loaders(vocab_size = vocab_size, train_frac = frac, batch_size = BATCH_SIZE, randomize=False, seed=SEED)
+            train(
+                model = model, 
+                train_loader = TRAIN_LOADER, 
+                test_loader = TEST_LOADER,
+                hidden_dim = HIDDEN_DIM, 
+                embed_dim = EMBED_DIM, 
+                num_lin_epochs = NUM_LIN_EPOCHS,
+                reg = REG,
+                save_last_frame = True,
+                save_frames = False,
+                suffix = f"frac_{frac}_prime_{vocab_size-1}_lr_{lr}",
+                record_loss = True,
+                freeze_first = True,
+                lr = lr,
+                sgd = SGD,
+            )
+
+
 
 if __name__ == "__main__":
-    train(
-        model = MODEL, 
-        train_loader = TRAIN_LOADER, 
-        test_loader = TEST_LOADER,
-        hidden_dim = HIDDEN_DIM, 
-        embed_dim = EMBED_DIM, 
-        num_lin_epochs = NUM_LIN_EPOCHS,
-        reg = REG,
-        save_last_frame = True,
-        save_frames = False,
-        suffix = "",
-        freeze_first = True,
-        lr = LR,
-    )
-
-
-
-
+    check_sgd_with_bootstrap_lr()
