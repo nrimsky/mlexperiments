@@ -13,20 +13,21 @@ from generate_movie import (
 from itertools import combinations
 from utils import get_weight_norm
 from sympy import primerange
-
+import numpy as np
 import math
+from matplotlib.colors import Normalize
+from matplotlib.cm import ScalarMappable
 
 
 def all_subsets(s):
     return [set(comb) for i in range(len(s) + 1) for comb in combinations(s, i)]
 
 
-def hash_with_seed(value, seed = 42):
+def hash_with_seed(value, seed=42):
     m = hashlib.sha256()
-    m.update(str(seed).encode('utf-8'))
-    m.update(str(value).encode('utf-8'))
+    m.update(str(seed).encode("utf-8"))
+    m.update(str(value).encode("utf-8"))
     return int(m.hexdigest(), 16)
-
 
 
 class RandomOperationDataset(data.Dataset):
@@ -41,8 +42,9 @@ class RandomOperationDataset(data.Dataset):
     def __getitem__(self, idx):
         a = idx // (self.d_vocab - 1)
         b = idx % (self.d_vocab - 1)
-        res = hash_with_seed(a + b + a*b*self.d_vocab) % (self.d_vocab - 1)
+        res = hash_with_seed(a + b + a * b * self.d_vocab) % (self.d_vocab - 1)
         return a, b, res
+
 
 class ModuloAdditionDataset(data.Dataset):
     def __init__(self, d_vocab=114):
@@ -84,7 +86,6 @@ def make_circle_embeddings(embed_dim, vocab_size):
         for k in k_values
     ]
     return t.cat(M_k_list, dim=1)
-
 
 
 class MLP(nn.Module):
@@ -133,13 +134,14 @@ def fourier_matrix(n):
             fourier_matrix[i, j] = t.complex(t.cos(theta), t.sin(theta))
     return fourier_matrix
 
+
 def inv_fourier_matrix(n):
     inv_fourier_matrix = t.zeros((n, n), dtype=t.cfloat)
     for i in range(n):
         for j in range(n):
             theta = t.tensor(2 * t.pi * i * j / (n))
             inv_fourier_matrix[i, j] = t.complex(t.cos(-theta), t.sin(-theta))
-    inv_fourier_matrix *= 1/(n)
+    inv_fourier_matrix *= 1 / (n)
     return inv_fourier_matrix
 
 
@@ -172,7 +174,6 @@ class MLP_unchunked(nn.Module):
         fourier_embedding = t.matmul(fourier_matrix, embedding_weights)
         return fourier_embedding
 
-
     def project_to_fourier_mode(self, filename):
         fourier_modes = self.get_fourier_modes()
         n = fourier_modes.shape[0]
@@ -193,12 +194,28 @@ class MLP_unchunked(nn.Module):
         dot_products_cos = t.matmul(cos, embeddings.t())
         dot_products_sin = t.matmul(sin, embeddings.t())
 
+        # Generate a colormap for the embeddings
+        colormap = plt.cm.rainbow
+        colors = [colormap(i) for i in np.linspace(0, 1, embeddings.shape[0])]
+
         for i in range(n_plots):
             plt.subplot(num_rows, num_cols, i + 1)
-            plt.scatter(dot_products_cos[i].numpy(), dot_products_sin[i].numpy())
+            # Scatter plot with colors all at once
+            color_idx = [(j * i) % embeddings.shape[0] for j in range(embeddings.shape[0])] 
+            color_for_mode = [colors[idx] for idx in color_idx]
+            plt.scatter(dot_products_cos[i].numpy(), dot_products_sin[i].numpy(), c=color_for_mode)
             plt.title(f"Mode {i}")
 
-        plt.tight_layout()
+        # Define the normalization for the colorbar
+        norm = Normalize(vmin=0, vmax=len(embeddings))
+        sm = ScalarMappable(cmap=colormap, norm=norm)
+        sm.set_array([])  # Only needed for matplotlib < 3.1
+
+        # Add a colorbar for the colormap
+        cbar_ax = plt.gcf().add_axes([0.92, 0.15, 0.02, 0.7])  # x, y, width, height
+        plt.colorbar(sm, cax=cbar_ax)
+
+        plt.tight_layout(rect=[0, 0, 0.9, 1])  # Adjust the main layout to make space for the colorbar
         plt.savefig(filename)
         plt.close()
 
@@ -319,13 +336,13 @@ def train(
     vocab_size=114,
     hidden_dim=32,
     embed_dim=16,
-    num_epochs = 500,
+    num_epochs=500,
     save_frames=True,
     reg=0.005,
     use_circular_embeddings=False,
     freeze_embed=False,
     use_unchunked=False,
-    lr=0.01
+    lr=0.01,
 ):
     if use_unchunked:
         model = MLP_unchunked(
@@ -362,7 +379,7 @@ def train(
             optimizer.step()
             frame_n += 1
             if save_frames:
-                if frame_n % 500 == 0: #for big network might use 10
+                if frame_n % 100 == 0:  # for big network might use 10
                     with t.no_grad():
                         step += 1
                         if use_unchunked:
@@ -370,7 +387,7 @@ def train(
                         else:
                             plot_embeddings_movie(model, step)
         model.eval()
-        if epoch % 50 == 0:
+        if epoch % 10 == 0:
             val_loss, val_acc = test_model(model, test_loader, device, criterion)
             train_loss, train_acc = test_model(model, train_loader, device, criterion)
             print(
@@ -420,22 +437,23 @@ def experiment(model, test_loader, frac=0.5):
         )
         model.embedding = t.nn.Parameter(orig_embedding.to(device))
 
+
 def train_manyprimes(
-        p_min = 17,
-        p_max = 217,
-        train_frac = 0.7,
-        batch_size = 256,
-        embed_dim = 8,
-        hidden_dim = 24,
-        use_unchunked = True,
-        randomize = False,
-    ):
-    primes = list(primerange(p_min, p_max+1))  
+    p_min=17,
+    p_max=217,
+    train_frac=0.7,
+    batch_size=256,
+    embed_dim=8,
+    hidden_dim=24,
+    use_unchunked=True,
+    randomize=False,
+):
+    primes = list(primerange(p_min, p_max + 1))
     for p in primes:
-        vocab_size = p+1
+        vocab_size = p + 1
         print(f"prime{p}")
         train_loader, test_loader = get_train_test_loaders(
-            train_frac, batch_size, vocab_size, randomize = randomize
+            train_frac, batch_size, vocab_size, randomize=randomize
         )
         train(
             train_loader,
@@ -443,14 +461,14 @@ def train_manyprimes(
             vocab_size=vocab_size,
             hidden_dim=hidden_dim,
             embed_dim=embed_dim,
-            num_epochs = 2000,
+            num_epochs=2000,
             save_frames=False,
             reg=0,
             use_circular_embeddings=False,
             freeze_embed=False,
             use_unchunked=True,
         )
-        run_movie_cmd(suffix = f"p_{p}")
+        run_movie_cmd(suffix=f"p_{p}")
     if use_unchunked:
         model = MLP_unchunked(
             vocab_size=vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim
@@ -472,21 +490,21 @@ def train_manyprimes(
 
 
 def train_manyfractions(
-        p = 23,     
-        batch_size = 256,
-        embed_dim = 6,
-        hidden_dim = 18,
-        use_unchunked = True,
-        randomize = False,
-        save_frames = False
-    ):
-    vocab_size = p+1
-    fractions = [n/10 for n in range(1, 10)]
+    p=23,
+    batch_size=256,
+    embed_dim=6,
+    hidden_dim=18,
+    use_unchunked=True,
+    randomize=False,
+    save_frames=False,
+):
+    vocab_size = p + 1
+    fractions = [n / 10 for n in range(1, 10)]
     for fraction in fractions:
         train_frac = fraction
         print(f"fraction {fraction}")
         train_loader, test_loader = get_train_test_loaders(
-            train_frac, batch_size, vocab_size, randomize = randomize
+            train_frac, batch_size, vocab_size, randomize=randomize
         )
         train(
             train_loader,
@@ -494,14 +512,14 @@ def train_manyfractions(
             vocab_size=vocab_size,
             hidden_dim=hidden_dim,
             embed_dim=embed_dim,
-            num_epochs = 3500,
+            num_epochs=3500,
             save_frames=save_frames,
             reg=0,
             use_circular_embeddings=False,
             freeze_embed=False,
             use_unchunked=use_unchunked,
         )
-        run_movie_cmd(suffix = f"p_{p}_frac_{fraction}")
+        run_movie_cmd(suffix=f"p_{p}_frac_{fraction}")
     if use_unchunked:
         model = MLP_unchunked(
             vocab_size=vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim
@@ -525,11 +543,11 @@ def train_manyfractions(
 if __name__ == "__main__":
     train_frac = 0.7
     batch_size = 256
-    vocab_size = 48
-    embed_dim = 8
-    hidden_dim = 32
+    vocab_size = 114
+    embed_dim = 3
+    hidden_dim = 64
     lr = 0.01
-    epochs = 1000
+    epochs = 500
     use_unchunked = True
     train_loader, test_loader = get_train_test_loaders(
         train_frac, batch_size, vocab_size, randomize=False
@@ -540,13 +558,13 @@ if __name__ == "__main__":
         vocab_size=vocab_size,
         embed_dim=embed_dim,
         hidden_dim=hidden_dim,
-        save_frames=False,
+        save_frames=True,
         use_circular_embeddings=False,
-        reg=0.0001,
+        reg=0.0,
         num_epochs=epochs,
         freeze_embed=False,
         use_unchunked=use_unchunked,
-        lr=lr
+        lr=lr,
     )
     model.project_to_fourier_mode("fourier_modes.png")
-
+    run_movie_cmd()
