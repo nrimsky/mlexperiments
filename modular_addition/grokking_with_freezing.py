@@ -21,6 +21,31 @@ import copy
 
 from mlp_modular import test_model
 
+from datetime import datetime
+
+def run_movie_cmd(suffix = ""):
+    if not os.path.exists("movies"):
+        os.mkdir("movies")
+    mp4_name = os.path.join('movies', f'movie_{datetime.now().strftime("%Y%m%d_%H%M%S")}{suffix}.mp4')
+    os.system(f'ffmpeg -framerate 3 -i frames/embeddings_movie_%06d.png -c:v libx264 -pix_fmt yuv420p {mp4_name}')
+    os.system('rm frames/embeddings_movie_*.png')
+    print(f'movie saved as {mp4_name}')
+
+def plot_embeddings_movie(model, step):
+    plt.clf()
+    embeddings = model.embedding.weight.detach().cpu() # vocab_size x embed_dim
+    #axs = axs.flatten()  # flatten the array of axes to simplify indexing
+    words = [str(i) for i in range(embeddings.shape[0])]
+    for j, word in enumerate(words):
+        axs[i].annotate(word, xy=(embeddings[j, 0], embeddings[j, 1]))
+    # make /frames if it does not exist
+    if not os.path.exists("frames"):
+        os.mkdir("frames")
+    plt.savefig(f"frames/embeddings_movie_{step:06}.png")  # change 'i' to your step variable
+    plt.close()
+
+
+
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
@@ -34,24 +59,40 @@ class Lambda(nn.Module):
         return self.func(x)
 
 
+class ComplexMultiply(nn.Module):
+    def __init__(self):
+        super(ComplexMultiply, self).__init__()
+
+    def forward(self, a, b):
+        real_part = a[..., 0] * b[..., 0] - a[..., 1] * b[..., 1]
+        imag_part = a[..., 0] * b[..., 1] + a[..., 1] * b[..., 0]
+        return t.stack([real_part, imag_part], dim=-1)
+
+
 class ModuloAdditionDataset(data.Dataset):
-    def __init__(self, d_vocab=114, seed = 42):
+    def __init__(self, d_vocab=114, seed = 42, tiny = False):
         super().__init__()
         self.d_vocab = d_vocab
-        self.eq_token = d_vocab - 1  # assuming '=' is the last token in the vocabulary
+        self.tiny = tiny
+        print(f"tiny is {self.tiny}")
+        if not self.tiny:
+            self.eq_token = d_vocab - 1  # assuming '=' is the last token in the vocabulary
 
     def __len__(self):
-        return (self.d_vocab - 1) ** 2
+        if self.tiny:
+            return 13
+        else:
+            return (self.d_vocab - 1) ** 2
 
     def __getitem__(self, idx):
-        a = idx // (self.d_vocab - 1)
+        a = idx // (self.d_vocab - 1) + 1 % (self.d_vocab - 1)
         b = idx % (self.d_vocab - 1)
         res = (a + b) % (self.d_vocab - 1)
         return a, b, res
 
 
 class MLP_unchunked(nn.Module):
-    def __init__(self, embed_dim, vocab_size, hidden_dim, asymmetric = False, quadratic = False):
+    def __init__(self, embed_dim, vocab_size, hidden_dim, asymmetric = False, quadratic = False, complex_multiply = False):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, embed_dim)
         self.linear1 = nn.Linear(embed_dim, hidden_dim, bias=False)
@@ -62,20 +103,30 @@ class MLP_unchunked(nn.Module):
         self.linear2 = nn.Linear(hidden_dim, embed_dim, bias=False)
         self.unembed = nn.Linear(embed_dim, vocab_size, bias=False)
         self.silu = nn.SiLU()
+        self.complex_multiply = complex_multiply
         if quadratic:
             self.silu = Lambda(lambda x: x * x)
+        if self.complex_multiply:
+            self.cm = ComplexMultiply()
         self.vocab_size = vocab_size
 
     def forward(self, x1, x2):
-        x1 = self.embedding(x1)
-        x2 = self.embedding(x2)
-        x1 = self.linear1(x1)
-        x2 = self.linear1r(x2)
-        x = x1 + x2
-        x = self.silu(x)
-        x = self.linear2(x)
-        x = self.unembed(x)
-        return x
+        if self.complex_multiply:
+            x1 = self.embedding(x1)
+            x2 = self.embedding(x2)
+            x = self.cm(x1, x2)
+            x = self.unembed(x)
+            return x
+        else:
+            x1 = self.embedding(x1)
+            x2 = self.embedding(x2)
+            x1 = self.linear1(x1)
+            x2 = self.linear1r(x2)
+            x = x1 + x2
+            x = self.silu(x)
+            x = self.linear2(x)
+            x = self.unembed(x)
+            return x
 
     def get_fourier_modes(self):
         embedding_weights = self.embedding.weight.detach().clone().cpu().to(t.cfloat)
@@ -150,11 +201,11 @@ def fracs(vocab_size, num_datapoints = 10):
    
 # model.load_state_dict(t.load("modular_addition.ckpt"))
 
-def get_train_test_loaders(train_frac, batch_size, vocab_size, randomize=False, seed=42, sequential = False):
+def get_train_test_loaders(train_frac, batch_size, vocab_size, randomize=False, seed=42, sequential = False, tiny = False):
     if randomize:
         dataset = RandomOperationDataset(vocab_size)
     else:
-        dataset = ModuloAdditionDataset(vocab_size)
+        dataset = ModuloAdditionDataset(vocab_size, tiny = tiny)
     total_length = len(dataset)
     train_length = int(total_length * train_frac)
     test_length = total_length - train_length
@@ -188,15 +239,16 @@ def train(model,
     freeze_first = False,
     sgd = False,
     lr=0.01,
+    use_unchunked = False,
 ):
     vocab_size = model.vocab_size
     num_epochs = num_lin_epochs//vocab_size
     print(f"Number of parameters: {count_parameters(model)}")
     # optimizer = t.optim.AdamW(model.parameters(), lr=0.01, weight_decay=0.0)
     if sgd:
-        optimizer = t.optim.SGD(model.parameters(), lr=lr, weight_decay=0.0)
+        optimizer = t.optim.SGD(model.parameters(), lr=lr, weight_decay=reg)
     else:
-        optimizer = t.optim.Adam(model.parameters(), lr=lr, weight_decay=0.0)        
+        optimizer = t.optim.Adam(model.parameters(), lr=lr, weight_decay=reg)        
     scheduler = t.optim.lr_scheduler.ExponentialLR(optimizer, gamma=1)
     criterion = nn.CrossEntropyLoss()
     epochs = num_epochs
@@ -217,7 +269,7 @@ def train(model,
             x1, x2, target = x1.to(device), x2.to(device), target.to(device)
             optimizer.zero_grad()
             output = model(x1, x2)
-            loss = criterion(output, target) + reg * get_weight_norm(model)
+            loss = criterion(output, target) #+ reg * get_weight_norm(model)
             train_loss += loss.item()
             loss.backward()
             optimizer.step()
@@ -367,7 +419,7 @@ def quad_exp():
     note that even for small primes, training_frac needs to be high-ish.
 """
 
-def phase_trans_search():
+def phase_trans_search(lr = 0.03, num_lin_epochs = 300000):
     VOCAB_SIZE = 114
     TRAIN_FRAC = 0.9
     BATCH_SIZE = 128
@@ -376,14 +428,14 @@ def phase_trans_search():
     HIDDEN_DIM=60
     EMBED_DIM=6
     MODEL =  MLP_unchunked(embed_dim=EMBED_DIM, vocab_size=VOCAB_SIZE, hidden_dim=HIDDEN_DIM)
-    NUM_LIN_EPOCHS = 100000 #300000
+    NUM_LIN_EPOCHS = num_lin_epochs
     QUADRATIC = True
     ASYMMETRIC = True
     REG=0
     save_frames = False
     save_last_frame = True
     suffix = ""
-    LR=0.03
+    LR=lr
 
     for n in range(10,20):
         for i in range(6):
@@ -693,6 +745,93 @@ def check_sgd_with_bootstrap_lr():
             )
 
 
+def comp_mult_exp():
+    VOCAB_SIZE = None
+    TRAIN_FRAC = 0.9
+    BATCH_SIZE = 128
+    SEED = 42 
+    TRAIN_LOADER, TEST_LOADER = get_train_test_loaders(vocab_size = VOCAB_SIZE, train_frac = TRAIN_FRAC, batch_size = BATCH_SIZE, randomize=False, seed=SEED)
+    HIDDEN_DIM=0
+    EMBED_DIM=2
+    MODEL =  MLP_unchunked(embed_dim=EMBED_DIM, vocab_size=VOCAB_SIZE, hidden_dim=HIDDEN_DIM)
+    NUM_LIN_EPOCHS = 200000 #300000
+    QUADRATIC = True
+    ASYMMETRIC = True  
+    REG=0
+    save_frames = False
+    save_last_frame = True
+    suffix = ""
+    LR=0.03
+    SGD = False
+ 
+
+    for n in range(10,20):
+        for i in range(14,19): #for adam
+            vocab_size = nextprime(int(10**(1 + n/10)))+1
+            model = MLP_unchunked(embed_dim=EMBED_DIM, vocab_size=vocab_size, hidden_dim=HIDDEN_DIM, asymmetric = ASYMMETRIC, quadratic = QUADRATIC, complex_multiply = True)
+            frac = vocab_size**(-0.4-0.015*i)
+            print(f"frac = {frac}, vocab_size = {vocab_size}")
+            TRAIN_LOADER, TEST_LOADER = get_train_test_loaders(vocab_size = vocab_size, train_frac = frac, batch_size = BATCH_SIZE, randomize=False, seed=SEED)
+            train(
+                model = model, 
+                train_loader = TRAIN_LOADER, 
+                test_loader = TEST_LOADER,
+                hidden_dim = HIDDEN_DIM, 
+                embed_dim = EMBED_DIM, 
+                num_lin_epochs = NUM_LIN_EPOCHS,
+                reg = REG,
+                save_last_frame = True,
+                save_frames = False,
+                suffix = f"frac_{frac}_prime_{vocab_size-1}",
+                record_loss = True,
+                freeze_first = True,
+                lr = LR,
+                sgd = SGD,
+            )
+"""
+    comments: this works ok though sensitive to LR. I haven't been able to get phase transition below something like frac = p**(-0.65)
+"""
+
+def comp_mult_movie():
+    VOCAB_SIZE = 114
+    TRAIN_FRAC = 0.9
+    BATCH_SIZE = 4
+    SEED = 42 
+    # TRAIN_LOADER, TEST_LOADER = get_train_test_loaders(vocab_size = VOCAB_SIZE, train_frac = TRAIN_FRAC, batch_size = BATCH_SIZE, randomize=False, seed=SEED)
+    HIDDEN_DIM=0
+    EMBED_DIM=2
+    MODEL =  MLP_unchunked(embed_dim=EMBED_DIM, vocab_size=VOCAB_SIZE, hidden_dim=HIDDEN_DIM)
+    NUM_LIN_EPOCHS = 100000 #300000
+    QUADRATIC = True
+    ASYMMETRIC = True  
+    REG=0
+    save_frames = False
+    save_last_frame = True
+    suffix = ""
+    LR=0.001
+    SGD = True
+    model = MLP_unchunked(embed_dim=EMBED_DIM, vocab_size=VOCAB_SIZE, hidden_dim=HIDDEN_DIM, asymmetric = ASYMMETRIC, quadratic = QUADRATIC, complex_multiply = True)
+    print(f"frac = {TRAIN_FRAC}, vocab_size = {VOCAB_SIZE}")
+    TRAIN_LOADER, TEST_LOADER = get_train_test_loaders(vocab_size = VOCAB_SIZE, train_frac = TRAIN_FRAC, batch_size = BATCH_SIZE, randomize=False, seed=SEED, tiny=True)
+    train(
+        model = model, 
+        train_loader = TRAIN_LOADER, 
+        test_loader = TEST_LOADER,
+        hidden_dim = HIDDEN_DIM, 
+        embed_dim = EMBED_DIM, 
+        num_lin_epochs = NUM_LIN_EPOCHS,
+        reg = REG,
+        save_last_frame = False,
+        save_frames = True,
+        suffix = f"frac_{TRAIN_FRAC}_prime_{VOCAB_SIZE-1}",
+        record_loss = True,
+        freeze_first = True,
+        lr = LR,
+        sgd = SGD,
+            )
+
+
 
 if __name__ == "__main__":
-    check_sgd_with_bootstrap_lr()
+    comp_mult_movie()
+#    comp_mult_exp()
