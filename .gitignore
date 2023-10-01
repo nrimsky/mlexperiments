@@ -17,4 +17,4 @@ results_*.txt
 modular_addition/embeddings_chunks*
 modular_addition/embeddings.png
 mnist/movies
-modular_addition/**.png
+modular_addition/**/*.png
