@@ -92,7 +92,7 @@ class ModuloAdditionDataset(data.Dataset):
 
 
 class MLP_unchunked(nn.Module):
-    def __init__(self, embed_dim, vocab_size, hidden_dim, asymmetric = False, quadratic = False, complex_multiply = False):
+    def __init__(self, embed_dim, vocab_size, hidden_dim, asymmetric = False, quadratic = False, complex_multiply = False, scale_embed = 1):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, embed_dim)
         self.linear1 = nn.Linear(embed_dim, hidden_dim, bias=False)
@@ -103,6 +103,7 @@ class MLP_unchunked(nn.Module):
         self.linear2 = nn.Linear(hidden_dim, embed_dim, bias=False)
         self.unembed = nn.Linear(embed_dim, vocab_size, bias=False)
         self.silu = nn.SiLU()
+        self.scale = scale_embed
         self.complex_multiply = complex_multiply
         if quadratic:
             self.silu = Lambda(lambda x: x * x)
@@ -112,8 +113,8 @@ class MLP_unchunked(nn.Module):
 
     def forward(self, x1, x2):
         if self.complex_multiply:
-            x1 = self.embedding(x1)
-            x2 = self.embedding(x2)
+            x1 = self.embedding(x1)*scale
+            x2 = self.embedding(x2)*scale
             x = self.cm(x1, x2)
             x = self.unembed(x)
             return x
@@ -713,6 +714,7 @@ def check_sgd_with_bootstrap_lr():
     QUADRATIC = True
     ASYMMETRIC = True
     REG=0
+    SCALE_EMBED = np.sqrt(VOCAB_SIZE - 1)
     save_frames = False
     save_last_frame = True
     suffix = ""
@@ -723,7 +725,7 @@ def check_sgd_with_bootstrap_lr():
         for i in range(1):
             lr = 10**(-n/3)
             vocab_size = 114
-            model = MLP_unchunked(embed_dim=EMBED_DIM, vocab_size=vocab_size, hidden_dim=HIDDEN_DIM, asymmetric = ASYMMETRIC, quadratic = QUADRATIC)
+            model = MLP_unchunked(embed_dim=EMBED_DIM, vocab_size=vocab_size, hidden_dim=HIDDEN_DIM, asymmetric = ASYMMETRIC, quadratic = QUADRATIC, scale_embed = SCALE_EMBED)
             frac = 0.4
             print(f"frac = {frac}, vocab_size = {vocab_size}")
             TRAIN_LOADER, TEST_LOADER = get_train_test_loaders(vocab_size = vocab_size, train_frac = frac, batch_size = BATCH_SIZE, randomize=False, seed=SEED)
@@ -833,5 +835,6 @@ def comp_mult_movie():
 
 
 if __name__ == "__main__":
-    comp_mult_movie()
+#    comp_mult_movie()
 #    comp_mult_exp()
+    check_sgd_with_bootstrap_lr()
