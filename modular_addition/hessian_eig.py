@@ -49,7 +49,7 @@ def hessian_eig_modular_addition(
         linear_operator,
         k=n_top_vectors,
         tol=0.001,
-        which="LM",
+        which="LA",
         return_eigenvectors=True,
     )
     tot = 0
